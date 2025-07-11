@@ -14,7 +14,7 @@ class QuantumDeviceEnv(gym.Env):
         """
         constructor for the environment
 
-        define action and obervation spaces
+        define action and observation spaces
 
         init state and variables
         """
