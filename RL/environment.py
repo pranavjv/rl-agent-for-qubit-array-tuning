@@ -105,34 +105,24 @@ class QuantumDeviceEnv(gym.Env):
             truncated (bool): Whether the episode was cut short (e.g., time limit).
             info (dict): A dictionary with auxiliary diagnostic information.
         """
+
         # --- Update the environment's state based on the action ---
-        # Apply the voltage settings to the quantum device
         # action is now a numpy array of shape (num_voltages,) containing voltage values
         self._apply_voltages(action)
 
         # --- Determine the reward ---
-        # The reward function is crucial for training the agent.
-        # For quantum dot tuning, reward could be based on:
-        # - Coulomb blockade visibility
-        # - Charge stability diagram quality
-        # - Distance from target charge configuration
-        # - Device stability metrics
-        reward = 0.0  # Placeholder - implement based on your quantum device metrics
-        # Example: reward = self._calculate_quantum_quality_metric()
+        reward = 0.0  
         
         # --- Check for termination or truncation conditions ---
-        # `terminated` is True if the agent reaches a terminal state (e.g., wins or loses).
-        terminated = False # Example: self._agent_location == self._target_location
+        terminated = False 
         
-        # `truncated` is True if the episode is ended for reasons not related to the task itself
-        # (e.g., a time limit is reached).
-        truncated = False # Example: self.current_step > 200
+        truncated = False # time limit reached etc
 
         # --- Get the new observation and info ---
-        observation = self._get_obs()
-        info = self._get_info()
+        observation = self._get_obs() #new state
+        info = self._get_info() #diagnostic info
         
-        # If you are using a human-rendering mode, you might want to render here
+        # render here
         if self.render_mode == "human":
             self._render_frame()
 
@@ -144,20 +134,9 @@ class QuantumDeviceEnv(gym.Env):
 
         Should return a value that conforms to self.observation_space.
         """
-        # Return current voltage settings as observation
-        # You might also want to include:
-        # - Measured quantum state parameters
-        # - Device stability metrics
-        # - Coulomb blockade measurements
-        # - Charge stability diagram features
-        
-        # For now, return the current voltages
-        # In practice, you'd want to include measurements from your quantum device
+        #currently just copies existing voltages
         observation = self.current_voltages.copy()
         
-        # If you have additional measurements, concatenate them:
-        # quantum_measurements = self._get_quantum_measurements()
-        # observation = np.concatenate([self.current_voltages, quantum_measurements])
         
         return observation
 
@@ -187,68 +166,28 @@ class QuantumDeviceEnv(gym.Env):
         # Update current voltage settings
         self.current_voltages = voltages.copy()
         
-        # Here you would integrate with your actual quantum device
-        # For example:
-        # - Send voltage commands to hardware
-        # - Update device simulation model
-        # - Measure resulting quantum state
-        
-        # Placeholder for device interaction
-        # self._update_device_simulation(voltages)
-        # self._measure_quantum_state()
+        #add to actual device
 
 
     def render(self):
         """
         Renders the environment.
-
-        The "human" mode typically pops up a window for visualization.
-        The "rgb_array" mode returns a numpy array of the rendered image.
         """
         if self.render_mode == "rgb_array":
             return self._render_frame()
-        # The 'human' mode is handled by the step and reset methods.
+
 
     def _render_frame(self):
         """
         Internal method to create the render image.
         """
-        # This is where you would use a library like Pygame or Matplotlib to draw
-        # the current state of the environment.
-        # For "human" mode, you'd display this to the screen.
-        # For "rgb_array" mode, you'd return it as a numpy array.
-        #
-        # Example with Pygame:
-        # if self.window is None and self.render_mode == "human":
-        #     pygame.init()
-        #     self.window = pygame.display.set_mode((500, 500))
-        # if self.clock is None and self.render_mode == "human":
-        #     self.clock = pygame.time.Clock()
-        #
-        # canvas = pygame.Surface((500, 500))
-        # canvas.fill((255, 255, 255)) # White background
-        # # ... draw your elements on the canvas ...
-        #
-        # if self.render_mode == "human":
-        #     self.window.blit(canvas, canvas.get_rect())
-        #     pygame.event.pump()
-        #     pygame.display.update()
-        #     self.clock.tick(self.metadata["render_fps"])
-        # else: # "rgb_array"
-        #     return np.transpose(
-        #         np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
-        #     )
-        pass # This should be implemented if you want to render
+        #render the csd
+        pass 
 
 
     def close(self):
         """
         Performs any necessary cleanup.
-
-        This is called when the environment is no longer needed. For example, you
-        can close the rendering window here.
         """
-        # if self.window is not None:
-        #     pygame.display.quit()
-        #     pygame.quit()
+  
         pass
