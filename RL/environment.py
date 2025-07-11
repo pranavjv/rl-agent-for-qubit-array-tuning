@@ -108,7 +108,7 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Update the environment's state based on the action ---
         # action is now a numpy array of shape (num_voltages,) containing voltage values
-        self._apply_voltages(action)
+        self._apply_voltages(action) #this step will update the qarray parameters stored in self.device_state
 
         # --- Determine the reward ---
         reward = 0.0  
@@ -130,7 +130,7 @@ class QuantumDeviceEnv(gym.Env):
 
     def _get_obs(self):
         """
-        Helper method to get the current observation of the environment.
+        Helper method to get the current observation of the environment. (parameter space)
 
         Should return a value that conforms to self.observation_space.
         """
