@@ -71,21 +71,17 @@ class QuantumDeviceEnv(gym.Env):
             observation (np.ndarray): The initial observation of the space.
             info (dict): A dictionary with auxiliary diagnostic information.
         """
-        # We need the following line to seed the random number generator
+        #seed the random number generator
         super().reset(seed=seed)
 
         # --- Reset the environment's state ---
-        # Example: Initialize the agent's location to a random spot.
-        # self._agent_location = self.np_random.integers(0, 10)
-        # self._target_location = 5 # Or some fixed/random value
+
 
         # --- Return the initial observation ---
-        # The observation should match the self.observation_space.
-        # For example, it might be a numpy array representing the agent's state.
         observation = self._get_obs()
         info = self._get_info()
 
-        # If you are using a human-rendering mode, you might want to render here
+        # If you are using a human-rendering mode render here
         if self.render_mode == "human":
             self._render_frame()
 
