@@ -21,22 +21,36 @@ class QuantumDeviceEnv(gym.Env):
         super().__init__()
 
         # --- Define Action and Observation Spaces ---
-        # These must be gymnasium.spaces objects.
-        # Example for a discrete action space with 2 actions (e.g., left or right):
-        self.action_space = spaces.Discrete(2)
+        
+        self.num_voltages = kwargs.get('num_voltages', 5)  # Default to 2 gate voltages and 3 barrier voltages
+        
+        # Voltage range, no clue what this should be physically
+        self.voltage_min = kwargs.get('voltage_min', -2.0)  # Minimum voltage
+        self.voltage_max = kwargs.get('voltage_max', 2.0)   # Maximum voltage
+        
+        # Continuous action space for N voltage controls
+        # Each action is a vector of N voltage values
+        self.action_space = spaces.Box(
+            low=self.voltage_min, 
+            high=self.voltage_max, 
+            shape=(self.num_voltages,), 
+            dtype=np.float32
+        )
 
-        # Example for a continuous observation space (e.g., a 4-dimensional vector):
-        # The shape is (4,) and values can be between -infinity and +infinity.
-        # For pixel observations, you would use spaces.Box(low=0, high=255, shape=(height, width, 3), dtype=np.uint8)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
+        # Observation space for quantum device state
+        ######################################################### TODO: define observation space
 
         # --- Initialize State ---
-        # It's good practice to initialize the state of the environment.
-        # However, the actual state for an episode is set in the reset() method.
-        self._agent_location = None # Example internal state
-        self._target_location = None # Example internal state
+        # Current voltage settings for each gate
+        self.current_voltages = np.zeros(self.num_voltages, dtype=np.float32)
+        
+        # Target voltage configuration
+        self.target_voltages = kwargs.get('target_voltages', None)
+        
+        # Device state variables, probably rest of params here?
+        self.device_state = {}
 
-        # --- For Rendering (Optional) ---
+        # --- For Rendering --- Think implementing this will be v useful for debugging
         self.window = None
         self.clock = None
 
@@ -96,18 +110,19 @@ class QuantumDeviceEnv(gym.Env):
             info (dict): A dictionary with auxiliary diagnostic information.
         """
         # --- Update the environment's state based on the action ---
-        # This is where you implement the "rules" of your game or simulation.
-        # For example:
-        # if action == 0:
-        #     self._agent_location -= 1
-        # else:
-        #     self._agent_location += 1
+        # Apply the voltage settings to the quantum device
+        # action is now a numpy array of shape (num_voltages,) containing voltage values
+        self._apply_voltages(action)
 
         # --- Determine the reward ---
         # The reward function is crucial for training the agent.
-        # reward = 0
-        # if self._agent_location == self._target_location:
-        #     reward = 1.0
+        # For quantum dot tuning, reward could be based on:
+        # - Coulomb blockade visibility
+        # - Charge stability diagram quality
+        # - Distance from target charge configuration
+        # - Device stability metrics
+        reward = 0.0  # Placeholder - implement based on your quantum device metrics
+        # Example: reward = self._calculate_quantum_quality_metric()
         
         # --- Check for termination or truncation conditions ---
         # `terminated` is True if the agent reaches a terminal state (e.g., wins or loses).
@@ -133,9 +148,22 @@ class QuantumDeviceEnv(gym.Env):
 
         Should return a value that conforms to self.observation_space.
         """
-        # For example, return a numpy array of the agent and target locations
-        # return np.array([self._agent_location, self._target_location], dtype=np.float32)
-        raise NotImplementedError("This method must be implemented")
+        # Return current voltage settings as observation
+        # You might also want to include:
+        # - Measured quantum state parameters
+        # - Device stability metrics
+        # - Coulomb blockade measurements
+        # - Charge stability diagram features
+        
+        # For now, return the current voltages
+        # In practice, you'd want to include measurements from your quantum device
+        observation = self.current_voltages.copy()
+        
+        # If you have additional measurements, concatenate them:
+        # quantum_measurements = self._get_quantum_measurements()
+        # observation = np.concatenate([self.current_voltages, quantum_measurements])
+        
+        return observation
 
 
     def _get_info(self):
@@ -144,9 +172,34 @@ class QuantumDeviceEnv(gym.Env):
 
         Can be used for debugging or logging, but the agent should not use it for learning.
         """
-        # For example, return the distance to the target
-        # return {"distance": np.abs(self._agent_location - self._target_location)}
-        return {}
+        return {
+            "current_voltages": self.current_voltages.copy(),
+            "target_voltages": self.target_voltages,
+            "device_state": self.device_state
+        }
+
+    def _apply_voltages(self, voltages):
+        """
+        Apply voltage settings to the quantum device.
+        
+        Args:
+            voltages (np.ndarray): Array of voltage values for each gate
+        """
+        # Ensure voltages are within bounds
+        voltages = np.clip(voltages, self.voltage_min, self.voltage_max)
+        
+        # Update current voltage settings
+        self.current_voltages = voltages.copy()
+        
+        # Here you would integrate with your actual quantum device
+        # For example:
+        # - Send voltage commands to hardware
+        # - Update device simulation model
+        # - Measure resulting quantum state
+        
+        # Placeholder for device interaction
+        # self._update_device_simulation(voltages)
+        # self._measure_quantum_state()
 
 
     def render(self):
