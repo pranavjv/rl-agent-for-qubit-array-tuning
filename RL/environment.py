@@ -3,7 +3,9 @@ from gymnasium import spaces
 import numpy as np
 import yaml
 import os
-
+import qarray
+from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
+import matplotlib.pyplot as plt
 
 class QuantumDeviceEnv(gym.Env):
     """
@@ -28,15 +30,10 @@ class QuantumDeviceEnv(gym.Env):
         self.seed = self.config['training']['seed']
         
         # --- Define Action and Observation Spaces ---
-    
         self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages and 3 barrier voltages
+        self.voltage_min = self.config['env']['action_space']['voltage_range'][0]  # Minimum voltage need to confirm what this should be physicall
+        self.voltage_max = self.config['env']['action_space']['voltage_range'][1]   # Maximum voltage need to confirm what this should be physicall
         
-        # Voltage range, need to confirm what this should be physically
-        self.voltage_min = self.config['env']['action_space']['voltage_range'][0]  # Minimum voltage
-        self.voltage_max = self.config['env']['action_space']['voltage_range'][1]   # Maximum voltage
-        
-        # Continuous action space for N voltage controls
-        # Each action is a vector of N voltage values
         self.action_space = spaces.Box(
             low=self.voltage_min, 
             high=self.voltage_max, 
@@ -48,14 +45,22 @@ class QuantumDeviceEnv(gym.Env):
         ######################################################### TODO: define observation space
 
         # --- Initialize State ---
-        # Current voltage settings for each gate
-        self.current_voltages = np.zeros(self.num_voltages, dtype=np.float32)
+        #init qarray model
+        model = self._load_model()
         
-        # Target state configuration
-        #to be defined (here is our ground truth state)
+        vg = model.gate_voltage_composer.do2d(
+            "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
+            "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
+        )
+        
+        vg += model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
+
 
         # Device state variables
-        self.device_state = self.config['simulator'] #make this the qarray params.
+        self.device_state = {
+            "model": model,
+            "current_voltages": vg,
+        }
 
         # --- For Rendering --- 
         self.render_fps = self.config['training']['render_fps']
@@ -79,7 +84,16 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         #reset the qarray params
-        self.device_state = self.config['simulator']
+        model = self._load_model()
+        vg = model.gate_voltage_composer.do2d(
+            "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
+            "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
+        )
+        vg += model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
+        self.device_state = {
+            "model": model,
+            "current_voltages": vg,
+        }
 
         # --- Return the initial observation ---
         observation = self._get_obs() #TODO: define this
@@ -132,16 +146,48 @@ class QuantumDeviceEnv(gym.Env):
 
         return observation, reward, terminated, truncated, info
 
+    def _load_model(self):
+        """
+        Load the model from the config file.
+        """
+        white_noise = WhiteNoise(amplitude=self.config['simulator']['model']['white_noise_amplitude'])
+        telegraph_noise = TelegraphNoise(**self.config['simulator']['model']['telegraph_noise_parameters'])
+        noise_model = white_noise + telegraph_noise
+        latching_params = self.config['simulator']['model']['latching_model_parameters']
+        latching_model = LatchingModel(**{k: v for k, v in latching_params.items() if k != "Exists"}) if latching_params["Exists"] else None
+
+
+        model = ChargeSensedDotArray(
+            Cdd=self.config['simulator']['model']['Cdd'],
+            Cgd=self.config['simulator']['model']['Cgd'],
+            Cds=self.config['simulator']['model']['Cds'],
+            Cgs=self.config['simulator']['model']['Cgs'],
+            coulomb_peak_width=self.config['simulator']['model']['coulomb_peak_width'],
+            T=self.config['simulator']['model']['T'],
+            noise_model=noise_model,
+            latching_model=latching_model,
+            algorithm=self.config['simulator']['model']['algorithm'],
+            implementation=self.config['simulator']['model']['implementation'],
+            max_charge_carriers=self.config['simulator']['model']['max_charge_carriers']
+        )
+
+        
+        model.gate_voltage_composer.virtual_gate_matrix = self.config['simulator']['virtual_gate_matrix']
+
+
+        return model
+
     def _get_obs(self):
         """
         Helper method to get the current observation of the environment. (parameter space)
 
         Should return a value that conforms to self.observation_space.
         """
-        #currently just copies existing state
-        observation = self.device_state.copy() #this is a dict of qarray params
-        
-        return observation
+        #get the current state
+        current_state = self.device_state
+
+        #return the current state
+        return current_state
 
 
     def _get_info(self):
@@ -151,8 +197,6 @@ class QuantumDeviceEnv(gym.Env):
         Can be used for debugging or logging, but the agent should not use it for learning.
         """
         return {
-            "current_voltages": self.current_voltages.copy(),
-            "target_state": self.target_state,
             "device_state": self.device_state
         }
 
@@ -173,21 +217,6 @@ class QuantumDeviceEnv(gym.Env):
         
 
 
-
-    def render(self):
-        """
-        Renders the environment.
-        """
-        if self.render_mode == "rgb_array":
-            return self._render_frame()
-        
-        elif self.render_mode == "human":
-            return self._render_frame()
-        
-        else:
-            raise ValueError(f"Invalid render mode: {self.render_mode}")
-
-
     def _render_frame(self):
         """
         Internal method to create the render image.
@@ -195,8 +224,14 @@ class QuantumDeviceEnv(gym.Env):
         Returns:
             np.ndarray: Single channel array representation of the environment state
         """
+        z, n = self.device_state["model"].charge_sensor_open(self.device_state["current_voltages"])
         #render the csd
-        pass 
+        plt.imshow(z[:, :, 0], cmap='viridis', aspect='auto')
+        plt.title('Quantum Dot Measurement')
+        plt.savefig('quantum_dot_plot.png', dpi=150, bbox_inches='tight')
+        plt.close()
+        print("Plot saved as 'quantum_dot_plot.png'") 
+ 
 
 
     def close(self):
@@ -224,3 +259,10 @@ class QuantumDeviceEnv(gym.Env):
             config = yaml.safe_load(file)
             
         return config
+
+
+if __name__ == "__main__":
+    env = QuantumDeviceEnv()
+    env.reset()
+    env.step(env.action_space.sample())
+    env.close()
