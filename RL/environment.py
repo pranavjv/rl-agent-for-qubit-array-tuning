@@ -14,7 +14,7 @@ class QuantumDeviceEnv(gym.Env):
     #rendering info
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, config_path='RL/env_config.yaml'):
+    def __init__(self, config_path='RL/env_config.yaml', render_mode=None):
         """
         constructor for the environment
 
@@ -68,7 +68,7 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- For Rendering --- 
         self.render_fps = self.config['training']['render_fps']
-        self.render_mode = self.config['training']['render_mode']
+        self.render_mode = render_mode or self.config['training']['render_mode']
 
 
     def reset(self):
@@ -103,10 +103,6 @@ class QuantumDeviceEnv(gym.Env):
         # --- Return the initial observation ---
         observation = self._get_obs() #TODO: define this
         info = self._get_info() #TODO: define this
-
-        # If you are using a human-rendering mode render here
-        if self.render_mode == "human":
-            self._render_frame()
 
         return observation, info
 
@@ -150,10 +146,6 @@ class QuantumDeviceEnv(gym.Env):
         observation = self._get_obs() #new state
         info = self._get_info() #diagnostic info
         
-        # render here
-        if self.render_mode == "human":
-            self._render_frame()
-
         return observation, reward, terminated, truncated, info
 
     def _load_model(self):
@@ -227,24 +219,72 @@ class QuantumDeviceEnv(gym.Env):
         
 
 
+    def render(self):
+        """
+        Render the environment state.
+        
+        Returns:
+            np.ndarray: RGB array representation of the environment state
+        """
+        if self.render_mode == "rgb_array":
+            return self._render_frame()
+        elif self.render_mode == "human":
+            # For human mode, save the plot and return None
+            self._render_frame()
+            return None
+        else:
+            return None
+
     def _render_frame(self):
         """
         Internal method to create the render image.
         
         Returns:
-            np.ndarray: Single channel array representation of the environment state
+            np.ndarray: RGB array representation of the environment state
         """
         z, n = self.device_state["model"].charge_sensor_open(self.device_state["current_voltages"])
-        #render the csd
-        plt.imshow(z[:, :, 0], cmap='viridis', aspect='auto')
-        plt.title('Measurement')
         
-        # Save plot in the same directory as this script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        plot_path = os.path.join(script_dir, 'quantum_dot_plot.png')
-        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        print(f"Plot saved as '{plot_path}'") 
+        # Create figure and plot
+
+        vmin, vmax = (-20,20)
+        num_ticks = 5
+        tick_values = np.linspace(vmin, vmax, num_ticks)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.imshow(z[:, :, 0], cmap='viridis', aspect='auto')
+        
+        # Set x and y axis ticks to correspond to voltage range
+        ax.set_xticks(np.linspace(0, z.shape[1]-1, num_ticks))
+        ax.set_xticklabels([f'{v:.0f}' for v in tick_values])
+        ax.set_yticks(np.linspace(0, z.shape[0]-1, num_ticks))
+        ax.set_yticklabels([f'{v:.0f}' for v in tick_values])
+        
+        ax.set_xlabel("$\Delta$PL (mV)")
+        ax.set_ylabel("$\Delta$PR (mV)")
+        ax.set_title("$|S_{11}|$ (arb.)")
+        
+        cbar = plt.colorbar(im, ax=ax)
+        c_vmin, c_vmax = im.get_clim()
+        c_tick_values = np.linspace(c_vmin, c_vmax, num_ticks)
+        cbar.set_ticks(c_tick_values)
+
+
+        
+        if self.render_mode == "human":
+            # Save plot for human mode
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            plot_path = os.path.join(script_dir, 'quantum_dot_plot.png')
+            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            print(f"Plot saved as '{plot_path}'")
+            return None
+        else:
+            # Convert to RGB array for rgb_array mode
+            fig.canvas.draw()
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            plt.close()
+            return data
  
 
 
@@ -278,5 +318,7 @@ class QuantumDeviceEnv(gym.Env):
 if __name__ == "__main__":
     env = QuantumDeviceEnv()
     env.reset()
+    env.render()  # This will save the initial state plot
     env.step(env.action_space.sample())
+    env.render()  # This will save the plot after the action
     env.close()
