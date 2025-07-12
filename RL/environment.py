@@ -1,6 +1,8 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import yaml
+import os
 
 
 class QuantumDeviceEnv(gym.Env):
@@ -10,7 +12,7 @@ class QuantumDeviceEnv(gym.Env):
     #rendering info
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, **kwargs):
+    def __init__(self, config_path='RL/env_config.yaml'):
         """
         constructor for the environment
 
@@ -20,13 +22,18 @@ class QuantumDeviceEnv(gym.Env):
         """
         super().__init__()
 
+        # --- Load Configuration ---
+        self.config = self._load_config(config_path)
+        self.debug = self.config['training']['debug']
+        self.seed = self.config['training']['seed']
+        
         # --- Define Action and Observation Spaces ---
+    
+        self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages and 3 barrier voltages
         
-        self.num_voltages = kwargs.get('num_voltages', 5)  # Default to 2 gate voltages and 3 barrier voltages
-        
-        # Voltage range, no clue what this should be physically
-        self.voltage_min = kwargs.get('voltage_min', -2.0)  # Minimum voltage
-        self.voltage_max = kwargs.get('voltage_max', 2.0)   # Maximum voltage
+        # Voltage range, need to confirm what this should be physically
+        self.voltage_min = self.config['env']['action_space']['voltage_range'][0]  # Minimum voltage
+        self.voltage_max = self.config['env']['action_space']['voltage_range'][1]   # Maximum voltage
         
         # Continuous action space for N voltage controls
         # Each action is a vector of N voltage values
@@ -45,14 +52,14 @@ class QuantumDeviceEnv(gym.Env):
         self.current_voltages = np.zeros(self.num_voltages, dtype=np.float32)
         
         # Target state configuration
-        self.target_state = kwargs.get('target_state', None)
-        
-        # Device state variables
-        self.device_state = {} #make this the qarray params.
+        #to be defined (here is our ground truth state)
 
-        # --- For Rendering --- Think implementing this will be v useful for debugging
-        self.window = None
-        self.clock = None
+        # Device state variables
+        self.device_state = self.config['simulator'] #make this the qarray params.
+
+        # --- For Rendering --- 
+        self.render_fps = self.config['training']['render_fps']
+        self.render_mode = self.config['training']['render_mode']
 
 
     def reset(self, seed=None, options=None):
@@ -76,11 +83,11 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         #reset the qarray params
-        self.device_state = {}
+        self.device_state = self.config['simulator']
 
         # --- Return the initial observation ---
-        observation = self._get_obs()
-        info = self._get_info()
+        observation = self._get_obs() #TODO: define this
+        info = self._get_info() #TODO: define this
 
         # If you are using a human-rendering mode render here
         if self.render_mode == "human":
@@ -135,7 +142,7 @@ class QuantumDeviceEnv(gym.Env):
 
         Should return a value that conforms to self.observation_space.
         """
-        #currently just copies existing voltages
+        #currently just copies existing state
         observation = self.device_state.copy() #this is a dict of qarray params
         
         return observation
@@ -193,3 +200,21 @@ class QuantumDeviceEnv(gym.Env):
         """
   
         pass
+
+    def _load_config(self, config_path):
+        """
+        Load configuration from YAML file.
+        
+        Args:
+            config_path (str): Path to the YAML configuration file
+            
+        Returns:
+            dict: Configuration dictionary
+        """
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+            
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+            
+        return config
