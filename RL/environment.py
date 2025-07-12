@@ -35,8 +35,8 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Define Action and Observation Spaces ---
         self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages and 3 barrier voltages
-        self.voltage_min = self.config['env']['action_space']['voltage_range'][0]  # Minimum voltage need to confirm what this should be physicall
-        self.voltage_max = self.config['env']['action_space']['voltage_range'][1]   # Maximum voltage need to confirm what this should be physicall
+        self.voltage_min = self.config['env']['action_space']['voltage_range'][0]  # Minimum voltage need to confirm what this should be physical
+        self.voltage_max = self.config['env']['action_space']['voltage_range'][1]   # Maximum voltage need to confirm what this should be physical
         
         self.action_space = spaces.Box(
             low=self.voltage_min, 
