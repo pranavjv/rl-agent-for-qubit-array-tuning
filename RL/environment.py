@@ -48,26 +48,13 @@ class QuantumDeviceEnv(gym.Env):
         # Observation space for quantum device state
         ######################################################### TODO: define observation space
 
-        # --- Initialize State ---
-        #init qarray model
-        model = self._load_model()
+        # --- Initialize Model (one-time setup) ---
+        self.model = self._load_model()
         
-        vg = model.gate_voltage_composer.do2d(
-            "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
-            "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
-        )
-        
-        vg += model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
 
-
-        # Device state variables
-        self.device_state = {
-            "model": model,
-            "current_voltages": vg,
-        }
 
         # --- For Rendering --- 
-        self.render_fps = self.config['training']['render_fps']
+        self.render_fps = self.config['training']['render_fps'] #unused for now
         self.render_mode = render_mode or self.config['training']['render_mode']
 
 
@@ -88,20 +75,24 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         self.current_step = 0
-        #reset the qarray params
-        model = self._load_model()
-        vg = model.gate_voltage_composer.do2d(
+        
+        # Initialize episode-specific voltage state
+        vg = self.model.gate_voltage_composer.do2d(
             "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
             "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
         )
-        vg += model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
+        
+        vg_ground_truth = vg + self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
+        
+        # Device state variables (episode-specific)
         self.device_state = {
-            "model": model,
+            "model": self.model,
             "current_voltages": vg,
+            "ground_truth_voltages": vg_ground_truth,
         }
 
         # --- Return the initial observation ---
-        observation = self._get_obs() #TODO: define this
+        observation = self._get_obs() 
         info = self._get_info() #TODO: define this
 
         return observation, info
@@ -180,7 +171,7 @@ class QuantumDeviceEnv(gym.Env):
 
     def _get_obs(self):
         """
-        Helper method to get the current observation of the environment. (parameter space)
+        Helper method to get the current observation of the environment. (right now this is current model and current voltages)
 
         Should return a value that conforms to self.observation_space.
         """
@@ -211,8 +202,8 @@ class QuantumDeviceEnv(gym.Env):
         # Ensure voltages are within bounds
         voltages = np.clip(voltages, self.voltage_min, self.voltage_max)
         
-        # Update current voltage settings
-        self.current_voltages = voltages.copy()
+        # Update current voltage settings in device state
+        self.device_state["current_voltages"] = voltages.copy()
         
         #map from voltage to qarray params
         
