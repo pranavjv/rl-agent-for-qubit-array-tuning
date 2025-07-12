@@ -44,11 +44,11 @@ class QuantumDeviceEnv(gym.Env):
         # Current voltage settings for each gate
         self.current_voltages = np.zeros(self.num_voltages, dtype=np.float32)
         
-        # Target voltage configuration
-        self.target_voltages = kwargs.get('target_voltages', None)
+        # Target state configuration
+        self.target_state = kwargs.get('target_state', None)
         
-        # Device state variables, probably rest of params here?
-        self.device_state = {}
+        # Device state variables
+        self.device_state = {} #make this the qarray params.
 
         # --- For Rendering --- Think implementing this will be v useful for debugging
         self.window = None
@@ -75,7 +75,8 @@ class QuantumDeviceEnv(gym.Env):
         super().reset(seed=seed)
 
         # --- Reset the environment's state ---
-
+        #reset the qarray params
+        self.device_state = {}
 
         # --- Return the initial observation ---
         observation = self._get_obs()
@@ -111,7 +112,7 @@ class QuantumDeviceEnv(gym.Env):
         self._apply_voltages(action) #this step will update the qarray parameters stored in self.device_state
 
         # --- Determine the reward ---
-        reward = 0.0  
+        reward = 0.0  #will compare current state to target state
         
         # --- Check for termination or truncation conditions ---
         terminated = False 
@@ -135,8 +136,7 @@ class QuantumDeviceEnv(gym.Env):
         Should return a value that conforms to self.observation_space.
         """
         #currently just copies existing voltages
-        observation = self.current_voltages.copy()
-        
+        observation = self.device_state.copy() #this is a dict of qarray params
         
         return observation
 
@@ -149,7 +149,7 @@ class QuantumDeviceEnv(gym.Env):
         """
         return {
             "current_voltages": self.current_voltages.copy(),
-            "target_voltages": self.target_voltages,
+            "target_state": self.target_state,
             "device_state": self.device_state
         }
 
@@ -166,7 +166,9 @@ class QuantumDeviceEnv(gym.Env):
         # Update current voltage settings
         self.current_voltages = voltages.copy()
         
-        #add to actual device
+        #map from voltage to qarray params
+        
+
 
 
     def render(self):
