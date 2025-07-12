@@ -62,7 +62,7 @@ class QuantumDeviceEnv(gym.Env):
         self.render_mode = self.config['training']['render_mode']
 
 
-    def reset(self, seed=None, options=None):
+    def reset(self):
         """
         Resets the environment to an initial state and returns the initial observation.
 
@@ -70,16 +70,12 @@ class QuantumDeviceEnv(gym.Env):
         reset the state of the environment and return the first observation that
         the agent will see.
 
-        Args:
-            seed (int, optional): The seed that is used to initialize the environment's RNG.
-            options (dict, optional): Can be used to provide additional information to reset the environment.
-
         Returns:
             observation (np.ndarray): The initial observation of the space.
             info (dict): A dictionary with auxiliary diagnostic information.
         """
         #seed the random number generator
-        super().reset(seed=seed)
+        super().reset(seed=self.seed)
 
         # --- Reset the environment's state ---
         #reset the qarray params
@@ -184,11 +180,20 @@ class QuantumDeviceEnv(gym.Env):
         """
         if self.render_mode == "rgb_array":
             return self._render_frame()
+        
+        elif self.render_mode == "human":
+            return self._render_frame()
+        
+        else:
+            raise ValueError(f"Invalid render mode: {self.render_mode}")
 
 
     def _render_frame(self):
         """
         Internal method to create the render image.
+        
+        Returns:
+            np.ndarray: Single channel array representation of the environment state
         """
         #render the csd
         pass 
@@ -200,6 +205,7 @@ class QuantumDeviceEnv(gym.Env):
         """
   
         pass
+    
 
     def _load_config(self, config_path):
         """
