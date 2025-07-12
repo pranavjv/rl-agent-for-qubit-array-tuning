@@ -172,7 +172,6 @@ class QuantumDeviceEnv(gym.Env):
             implementation=self.config['simulator']['model']['implementation'],
             max_charge_carriers=self.config['simulator']['model']['max_charge_carriers']
         )
-
         
         model.gate_voltage_composer.virtual_gate_matrix = self.config['simulator']['virtual_gate_matrix']
 
@@ -218,7 +217,6 @@ class QuantumDeviceEnv(gym.Env):
         #map from voltage to qarray params
         
 
-
     def render(self):
         """
         Render the environment state.
@@ -234,6 +232,7 @@ class QuantumDeviceEnv(gym.Env):
             return None
         else:
             return None
+
 
     def _render_frame(self):
         """
@@ -266,10 +265,9 @@ class QuantumDeviceEnv(gym.Env):
         cbar = plt.colorbar(im, ax=ax)
         c_vmin, c_vmax = im.get_clim()
         c_tick_values = np.linspace(c_vmin, c_vmax, num_ticks)
-        cbar.set_ticks(c_tick_values)
+        cbar.set_ticks(list(c_tick_values))
 
 
-        
         if self.render_mode == "human":
             # Save plot for human mode
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -281,7 +279,7 @@ class QuantumDeviceEnv(gym.Env):
         else:
             # Convert to RGB array for rgb_array mode
             fig.canvas.draw()
-            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8) #type: ignore
             data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             plt.close()
             return data
@@ -320,5 +318,5 @@ if __name__ == "__main__":
     env.reset()
     env.render()  # This will save the initial state plot
     env.step(env.action_space.sample())
-    env.render()  # This will save the plot after the action
+    env.render()  # This will save the plot after the action 
     env.close()
