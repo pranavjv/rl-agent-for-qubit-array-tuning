@@ -26,9 +26,13 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Load Configuration ---
         self.config = self._load_config(config_path)
+
         self.debug = self.config['training']['debug']
         self.seed = self.config['training']['seed']
-        
+        self.max_steps = self.config['env']['max_steps']
+        self.current_step = 0
+
+
         # --- Define Action and Observation Spaces ---
         self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages and 3 barrier voltages
         self.voltage_min = self.config['env']['action_space']['voltage_range'][0]  # Minimum voltage need to confirm what this should be physicall
@@ -83,6 +87,7 @@ class QuantumDeviceEnv(gym.Env):
         super().reset(seed=self.seed)
 
         # --- Reset the environment's state ---
+        self.current_step = 0
         #reset the qarray params
         model = self._load_model()
         vg = model.gate_voltage_composer.do2d(
@@ -125,16 +130,21 @@ class QuantumDeviceEnv(gym.Env):
         """
 
         # --- Update the environment's state based on the action ---
+        self.current_step += 1
         # action is now a numpy array of shape (num_voltages,) containing voltage values
+
         self._apply_voltages(action) #this step will update the qarray parameters stored in self.device_state
 
         # --- Determine the reward ---
         reward = 0.0  #will compare current state to target state
         
         # --- Check for termination or truncation conditions ---
-        terminated = False 
+        terminated = False
+        truncated = False
         
-        truncated = False # time limit reached etc
+        if self.current_step >= self.max_steps:
+            truncated = True
+
 
         # --- Get the new observation and info ---
         observation = self._get_obs() #new state
@@ -227,10 +237,14 @@ class QuantumDeviceEnv(gym.Env):
         z, n = self.device_state["model"].charge_sensor_open(self.device_state["current_voltages"])
         #render the csd
         plt.imshow(z[:, :, 0], cmap='viridis', aspect='auto')
-        plt.title('Quantum Dot Measurement')
-        plt.savefig('quantum_dot_plot.png', dpi=150, bbox_inches='tight')
+        plt.title('Measurement')
+        
+        # Save plot in the same directory as this script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        plot_path = os.path.join(script_dir, 'quantum_dot_plot.png')
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close()
-        print("Plot saved as 'quantum_dot_plot.png'") 
+        print(f"Plot saved as '{plot_path}'") 
  
 
 

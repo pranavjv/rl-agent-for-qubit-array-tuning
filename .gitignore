@@ -116,6 +116,7 @@ checkpoints/
 models/
 weights/
 saved_models/
+*.png
 
 # Data directories
 data/
