@@ -45,18 +45,132 @@ class QuantumDeviceEnv(gym.Env):
             dtype=np.float32
         )
 
-        # Observation space for quantum device state
-        ######################################################### TODO: define observation space
+        # Observation space for quantum device state - 1-channel 128x128 image
+        obs_config = self.config['env']['observation_space']
+        self.obs_image_size = obs_config['image_size']
+        self.obs_channels = obs_config['channels']
+        self.obs_normalization_range = obs_config['normalization_range']
+        self.obs_dtype = obs_config['dtype']
+        
+        self.observation_space = spaces.Box(
+            low=self.obs_normalization_range[0],
+            high=self.obs_normalization_range[1],
+            shape=(self.obs_image_size[0], self.obs_image_size[1], self.obs_channels),
+            dtype=np.float32
+        )
 
         # --- Initialize Model (one-time setup) ---
         self.model = self._load_model()
         
-
+        # --- Initialize normalization parameters ---
+        self._init_normalization_params()
 
         # --- For Rendering --- 
         self.render_fps = self.config['training']['render_fps'] #unused for now
         self.render_mode = render_mode or self.config['training']['render_mode']
 
+    def _init_normalization_params(self):
+        """
+        Initialize normalization parameters for consistent scaling across episodes.
+        This method samples a few voltage configurations to estimate the data range.
+        """
+        if self.debug:
+            print("Initializing normalization parameters...")
+        
+        # Sample a few voltage center configurations to estimate data range
+        sample_centers = [
+            [0.0, 0.0, 0.0],  # Center
+            [self.voltage_min, self.voltage_min, self.voltage_min],  # Min
+            [self.voltage_max, self.voltage_max, self.voltage_max],  # Max
+        ]
+        
+        min_val = float('inf')
+        max_val = float('-inf')
+        
+        for center in sample_centers:
+            try:
+                # Create 2D voltage grid with this center
+                vg = self.model.gate_voltage_composer.do2d(
+                    "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
+                    "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
+                )
+                vg_with_offset = vg + self.model.optimal_Vg(center)
+                
+                z, _ = self.model.charge_sensor_open(vg_with_offset)
+                channel_data = z[:, :, 0]  # First channel
+                min_val = min(min_val, np.min(channel_data))
+                max_val = max(max_val, np.max(channel_data))
+            except Exception as e:
+                if self.debug:
+                    print(f"Warning: Could not sample center {center}: {e}")
+        
+        # Set normalization parameters with some safety margin
+        if min_val != float('inf') and max_val != float('-inf'):
+            self.data_min = min_val
+            self.data_max = max_val
+            # Add small margin to avoid edge cases
+            margin = (max_val - min_val) * 0.01
+            self.data_min -= margin
+            self.data_max += margin
+        else:
+            # Fallback values if sampling fails
+            self.data_min = -1.0
+            self.data_max = 1.0
+            
+        if self.debug:
+            print(f"Normalization range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+
+    def _normalize_observation(self, raw_data):
+        """
+        Normalize the raw charge sensor data to the observation space range.
+        
+        Args:
+            raw_data (np.ndarray): Raw charge sensor data of shape (height, width)
+            
+        Returns:
+            np.ndarray: Normalized observation of shape (height, width, 1)
+        """
+        # Ensure input is 2D
+        if raw_data.ndim != 2:
+            raise ValueError(f"Expected 2D array, got shape {raw_data.shape}")
+        
+        # Normalize to [0, 1] range
+        normalized = (raw_data - self.data_min) / (self.data_max - self.data_min)
+        
+        # Clip to ensure values are within bounds
+        normalized = np.clip(normalized, 0.0, 1.0)
+        
+        # Reshape to add channel dimension
+        normalized = normalized.reshape(normalized.shape[0], normalized.shape[1], 1)
+        
+        # Ensure correct dtype
+        normalized = normalized.astype(np.float32)
+        
+        return normalized
+
+    def _get_charge_sensor_data(self, voltages):
+        """
+        Get charge sensor data for given voltages.
+        
+        Args:
+            voltages (np.ndarray): 2D voltage grid or voltage center configuration
+            
+        Returns:
+            np.ndarray: Charge sensor data of shape (height, width, channels)
+        """
+        z, _ = self.device_state["model"].charge_sensor_open(voltages)
+        return z
+
+    def get_raw_observation(self):
+        """
+        Get raw (unnormalized) observation data for debugging purposes.
+        
+        Returns:
+            np.ndarray: Raw charge sensor data of shape (height, width)
+        """
+        current_voltages = self.device_state["current_voltages"]
+        z = self._get_charge_sensor_data(current_voltages)
+        return z[:, :, 0]
 
     def reset(self):
         """
@@ -77,6 +191,7 @@ class QuantumDeviceEnv(gym.Env):
         self.current_step = 0
         
         # Initialize episode-specific voltage state
+        #need to intialise vg somewhere that makes sense
         vg = self.model.gate_voltage_composer.do2d(
             "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
             "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
@@ -171,15 +286,26 @@ class QuantumDeviceEnv(gym.Env):
 
     def _get_obs(self):
         """
-        Helper method to get the current observation of the environment. (right now this is current model and current voltages)
-
-        Should return a value that conforms to self.observation_space.
+        Helper method to get the current observation of the environment.
+        
+        Returns a normalized 1-channel image observation that conforms to self.observation_space.
         """
-        #get the current state
-        current_state = self.device_state
-
-        #return the current state
-        return current_state
+        # Get current voltage configuration
+        current_voltages = self.device_state["current_voltages"]
+        
+        # Get charge sensor data
+        z = self._get_charge_sensor_data(current_voltages)
+        
+        # Extract first channel and normalize
+        channel_data = z[:, :, 0]  # Shape: (height, width)
+        observation = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
+        
+        # Validate observation shape
+        expected_shape = (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels)
+        if observation.shape != expected_shape:
+            raise ValueError(f"Observation shape {observation.shape} does not match expected {expected_shape}")
+        
+        return observation
 
 
     def _get_info(self):
@@ -189,7 +315,10 @@ class QuantumDeviceEnv(gym.Env):
         Can be used for debugging or logging, but the agent should not use it for learning.
         """
         return {
-            "device_state": self.device_state
+            "device_state": self.device_state,
+            "current_step": self.current_step,
+            "normalization_range": [self.data_min, self.data_max],
+            "observation_shape": (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels)
         }
 
     def _apply_voltages(self, voltages):
@@ -203,9 +332,11 @@ class QuantumDeviceEnv(gym.Env):
         voltages = np.clip(voltages, self.voltage_min, self.voltage_max)
         
         # Update current voltage settings in device state
-        self.device_state["current_voltages"] = voltages.copy()
+        self.device_state["current_voltages"][:,:,0] += voltages[0] 
+        self.device_state["current_voltages"][:,:,1] += voltages[1] 
+        self.device_state["current_voltages"][:,:,2] += voltages[2]
         
-        #map from voltage to qarray params
+         
          
 
     def render(self):
