@@ -30,6 +30,7 @@ class QuantumDeviceEnv(gym.Env):
         self.seed = self.config['training']['seed']
         self.max_steps = self.config['env']['max_steps']
         self.current_step = 0
+        self.tolerance = self.config['env']['tolerance']
 
 
         # --- Define Action and Observation Spaces ---
@@ -43,7 +44,6 @@ class QuantumDeviceEnv(gym.Env):
             shape=(self.num_voltages,), 
             dtype=np.float32
         )
-        ############################################################### NEED TO FIX THIS ACTION SPACE VOLTAGE RANGE CURRENTlY INCORRECT
 
         # Observation space for quantum device state - 1-channel 128x128 image
         obs_config = self.config['env']['observation_space']
@@ -211,9 +211,6 @@ class QuantumDeviceEnv(gym.Env):
             "ground_truth_voltages": vg_ground_truth,
         }
 
-        ground_truth_voltages = self.device_state["ground_truth_voltages"]
-        ground_truth_center = np.mean(ground_truth_voltages, axis=(0,1))  # Center of ground truth sweep
-        print(ground_truth_center)
 
         # --- Return the initial observation ---
         observation = self._get_obs() 
@@ -268,8 +265,7 @@ class QuantumDeviceEnv(gym.Env):
         current_voltage_settings = self._extract_voltage_centers(self.device_state["current_voltages"])
  
         # Compare only the first 2 dimensions (ignoring third dimension)
-        tolerance = 0.2  # 0.2V tolerance
-        at_target = np.all(np.abs(ground_truth_center - current_voltage_settings) <= tolerance)
+        at_target = np.all(np.abs(ground_truth_center - current_voltage_settings) <= self.tolerance)
         
         if at_target:
             terminated = True
@@ -413,7 +409,7 @@ class QuantumDeviceEnv(gym.Env):
         # Keep the third channel unchanged (as per the TODO comment)
         # self.device_state["current_voltages"][:,:,2] remains as initialized
 
-        self.device_state["current_voltages"] = np.clip(self.device_state["current_voltages"], self.action_voltage_min, self.action_voltage_max)
+        self.device_state["current_voltages"][:,:,:2] = np.clip(self.device_state["current_voltages"][:,:,:2], self.action_voltage_min, self.action_voltage_max)
     
 
     def _extract_voltage_centers(self, voltages):
@@ -539,7 +535,7 @@ if __name__ == "__main__":
     env.reset()
     env.render()  # This will save the initial state plot
     #action = env.action_space.sample()
-    action = np.array([-5.628181, -1.1628181])
+    action = np.array([-1.1628181, -1.1628181])
     print(action)
     env.step(action)
     env.render() # This will save the plot after the action 
