@@ -197,7 +197,7 @@ class QuantumDeviceEnv(gym.Env):
         )
         
         vg_ground_truth = vg + self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
-        
+        vg = vg_ground_truth
         # Device state variables (episode-specific)
         self.device_state = {
             "model": self.model,
@@ -237,7 +237,7 @@ class QuantumDeviceEnv(gym.Env):
         self._apply_voltages(action) #this step will update the qarray parameters stored in self.device_state
 
         # --- Determine the reward ---
-        reward = 0.0  #will compare current state to target state
+        reward = self._get_reward()  #will compare current state to target state
         
         # --- Check for termination or truncation conditions ---
         terminated = False
@@ -245,6 +245,20 @@ class QuantumDeviceEnv(gym.Env):
         
         if self.current_step >= self.max_steps:
             truncated = True
+        
+        # Check if ground truth center is at the center of the sweep measurement area (with tolerance)
+        ground_truth_voltages = self.device_state["ground_truth_voltages"]
+        center_voltage = np.mean(ground_truth_voltages, axis=0)
+        
+        # Calculate the center of the measurement area
+        measurement_center = (self.voltage_min + self.voltage_max) / 2
+        tolerance = 0.2  # 0.2V tolerance
+        
+        # Check if ground truth center is within tolerance of the measurement center
+        at_center = np.all(np.abs(center_voltage - measurement_center) <= tolerance)
+        
+        if at_center:
+            terminated = True
 
 
         # --- Get the new observation and info ---
@@ -252,6 +266,50 @@ class QuantumDeviceEnv(gym.Env):
         info = self._get_info() #diagnostic info
         
         return observation, reward, terminated, truncated, info
+    
+    def _get_reward(self):
+        """
+        Get the reward for the current state.
+
+        Reward is based on the distance from the target location, with maximum reward
+        when the agent is exactly at the ground truth location. The reward is calculated
+        as: max_possible_mse - current_mse, where max_possible_mse is the maximum possible
+        squared distance (v_max^2) to ensure positive rewards.
+
+        Only provides meaningful rewards if the ground truth voltages are within the
+        measurement area. Otherwise, a small negative penalty is given to discourage
+        exploration outside the measurement area.
+
+        The reward is also penalized by the number of steps taken to encourage efficiency.
+        """
+        current_voltages = self.device_state["current_voltages"]
+        ground_truth_voltages = self.device_state["ground_truth_voltages"]
+
+        # Check if the center (mean for each dimension) of ground truth voltages is within the measurement area for all dimensions
+        center_voltage = np.mean(ground_truth_voltages, axis=0)
+        in_measurement_area = np.all((center_voltage >= self.voltage_min) & (center_voltage <= self.voltage_max))
+
+        if in_measurement_area:
+            # Calculate MSE between current and target voltages
+            mse = np.mean((current_voltages - ground_truth_voltages) ** 2)
+            
+            # Calculate maximum possible MSE (worst case scenario)
+            # This is the squared distance from one corner to the opposite corner of the voltage space
+            max_possible_mse = (self.voltage_max - self.voltage_min) ** 2
+            
+            # Reward = max_possible_mse - current_mse
+            # This gives maximum reward (max_possible_mse) when MSE = 0 (exact match)
+            # and minimum reward (0) when MSE = max_possible_mse (worst case)
+            reward = max_possible_mse - mse
+        else:
+            # Small negative reward if ground truth is not visible
+            reward = -0.1
+
+        # Penalize for taking too many steps (small penalty to encourage efficiency)
+        reward -= self.current_step * 0.01
+
+        return reward
+
 
     def _load_model(self):
         """
@@ -364,7 +422,7 @@ class QuantumDeviceEnv(gym.Env):
         
         # Create figure and plot
 
-        vmin, vmax = (-20,20)
+        vmin, vmax = (self.voltage_min, self.voltage_max)
         num_ticks = 5
         tick_values = np.linspace(vmin, vmax, num_ticks)
 
@@ -377,8 +435,8 @@ class QuantumDeviceEnv(gym.Env):
         ax.set_yticks(np.linspace(0, z.shape[0]-1, num_ticks))
         ax.set_yticklabels([f'{v:.0f}' for v in tick_values])
         
-        ax.set_xlabel("$\Delta$PL (mV)")
-        ax.set_ylabel("$\Delta$PR (mV)")
+        ax.set_xlabel("$\Delta$PL (V)")
+        ax.set_ylabel("$\Delta$PR (V)")
         ax.set_title("$|S_{11}|$ (arb.)")
         
         cbar = plt.colorbar(im, ax=ax)
@@ -436,6 +494,6 @@ if __name__ == "__main__":
     env = QuantumDeviceEnv()
     env.reset()
     env.render()  # This will save the initial state plot
-    env.step(env.action_space.sample())
-    env.render()  # This will save the plot after the action 
+    #env.step(env.action_space.sample())
+    #env.render()  # This will save the plot after the action 
     env.close()

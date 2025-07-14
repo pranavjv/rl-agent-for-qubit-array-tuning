@@ -44,25 +44,25 @@ simulator:
     # Implementation for charge stability diagram
     implementation: "jax"
     # Maximum number of charge carriers
-    max_charge_carriers: 5
+    max_charge_carriers: 7
 
   measurement:
     # Voltage sweep ranges for charge stability diagram
-    vx_min: -1.0
-    vx_max: 1.0
-    vy_min: -1.0
-    vy_max: 1.0
+    vx_min: -4.0
+    vx_max: 4.0
+    vy_min: -4.0
+    vy_max: 4.0
 
     resolution: 128
     
     # Optimal gate voltage center for target state
-    optimal_VG_center: [1.5, 1.5, 0.65]
+    optimal_VG_center: [1, 1, 0.65]
 
   # Virtual gate transformation matrix
   virtual_gate_matrix:
     - [1, -0.0, 0]
     - [-0.0, 1, 0]
-    - [-0.1, -0.05, 0]
+    - [-0.05, -0.05, 0]
 
 env:
   # Maximum number of steps per episode
@@ -71,9 +71,6 @@ env:
   action_space:
     num_voltages: 3  #No longer easy to change, hardcoded in environment.py in update_voltages and in the basic ppo in the action space
     voltage_range: [-2.0, 2.0]
-
-    # Window size range for measurement area
-    window_size_range: [0.3, 2.5]
   
   observation_space:
     image_size: [128, 128]
