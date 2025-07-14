@@ -48,8 +48,8 @@ simulator:
 
   measurement:
     # Voltage sweep ranges for charge stability diagram
-    v_min: -10.0
-    v_max: 10.0
+    v_min: -2.0
+    v_max: 2.0
 
     resolution: 128
     

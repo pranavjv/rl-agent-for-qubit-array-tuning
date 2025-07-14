@@ -33,7 +33,7 @@ class QuantumDeviceEnv(gym.Env):
 
 
         # --- Define Action and Observation Spaces ---
-        self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages and 3 barrier voltages
+        self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages 
         self.action_voltage_min = self.config['env']['action_space']['voltage_range'][0]  
         self.action_voltage_max = self.config['env']['action_space']['voltage_range'][1]   
         
@@ -203,8 +203,6 @@ class QuantumDeviceEnv(gym.Env):
         vg_ground_truth = vg + self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
         vg = vg_ground_truth.copy()
 
-                
-
 
         # Device state variables (episode-specific)
         self.device_state = {
@@ -250,7 +248,9 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Determine the reward ---
         reward = self._get_reward()  #will compare current state to target state
-        
+        if self.debug:
+            print(f"reward: {reward}")
+
         # --- Check for termination or truncation conditions ---
         terminated = False
         truncated = False
@@ -262,14 +262,14 @@ class QuantumDeviceEnv(gym.Env):
         
         # Check if the centers of the voltage sweeps are aligned (ignoring third dimension)
         ground_truth_voltages = self.device_state["ground_truth_voltages"]
-        ground_truth_center = np.mean(ground_truth_voltages, axis=(0,1))  # Center of ground truth sweep
-        
+
+        ground_truth_center = self._extract_voltage_centers(ground_truth_voltages)  # Center of ground truth swee
         # Get current voltage settings (what the agent controls)
-        current_voltage_settings = self._get_current_voltage_settings()
-        
+        current_voltage_settings = self._extract_voltage_centers(self.device_state["current_voltages"])
+ 
         # Compare only the first 2 dimensions (ignoring third dimension)
         tolerance = 0.2  # 0.2V tolerance
-        at_target = np.all(np.abs(ground_truth_center[:2] - current_voltage_settings[:2]) <= tolerance)
+        at_target = np.all(np.abs(ground_truth_center - current_voltage_settings) <= tolerance)
         
         if at_target:
             terminated = True
@@ -294,22 +294,20 @@ class QuantumDeviceEnv(gym.Env):
         Only considers the first 2 dimensions (ignoring the third dimension).
         The reward is also penalized by the number of steps taken to encourage efficiency.
         """
+
         ground_truth_voltages = self.device_state["ground_truth_voltages"]
         
         # Calculate the center of the ground truth voltage sweep
-        ground_truth_center = np.mean(ground_truth_voltages, axis=(0,1))  # Shape: (3,)
+        ground_truth_center = self._extract_voltage_centers(ground_truth_voltages)  # Shape: (2,)
         
         # Get current voltage settings (what the agent controls)
         # We need to get this from the action that was just applied
         # Since action is passed to step(), we need to store it or calculate it
-        current_voltage_settings = self._get_current_voltage_settings()
+        current_voltage_settings = self._extract_voltage_centers(self.device_state["current_voltages"])
         
-        # Compare only the first 2 dimensions (ignoring third dimension)
-        target_center = ground_truth_center[:2]  # Shape: (2,)
-        current_settings = current_voltage_settings[:2]  # Shape: (2,)
-        
+
         # Calculate distance between target and current (2D)
-        distance = np.linalg.norm(target_center - current_settings)
+        distance = np.linalg.norm(ground_truth_center - current_voltage_settings)
         
         # Calculate maximum possible distance in 2D voltage space
         max_possible_distance = np.sqrt(2) * (self.obs_voltage_max - self.obs_voltage_min)
@@ -317,7 +315,7 @@ class QuantumDeviceEnv(gym.Env):
         # Reward = max_possible_distance - current_distance
         # This gives maximum reward when distance = 0 (perfect alignment)
         # and minimum reward (0) when distance = max_possible_distance (worst case)
-        reward = max_possible_distance - distance
+        reward = max(max_possible_distance - distance, 0)
         
         # Penalize for taking too many steps (small penalty to encourage efficiency)
         reward -= self.current_step * 0.01
@@ -400,26 +398,44 @@ class QuantumDeviceEnv(gym.Env):
             voltages (np.ndarray): Array of voltage values for each gate
         """
         
-        # Update current voltage settings in device state
-        for i in range(self.num_voltages-1):
-            self.device_state["current_voltages"][:,:,i] = voltages[i]    # voltage[i] affects gate i (what is the third dimension?)
+        # Create two grids centered around voltages[0] and voltages[1]
+        # Grid extent from obs_vmin to obs_vmax
+        x_grid = np.linspace(self.obs_voltage_min, self.obs_voltage_max, self.obs_image_size[1])
+        y_grid = np.linspace(self.obs_voltage_min, self.obs_voltage_max, self.obs_image_size[0])
+        
+        # Create 2D grids centered around the voltage values
+        X, Y = np.meshgrid(x_grid + voltages[0], y_grid + voltages[1])
+
+        # Update the first two channels with the new grids
+        self.device_state["current_voltages"][:,:,0] = X
+        self.device_state["current_voltages"][:,:,1] = Y
+        
+        # Keep the third channel unchanged (as per the TODO comment)
+        # self.device_state["current_voltages"][:,:,2] remains as initialized
 
         self.device_state["current_voltages"] = np.clip(self.device_state["current_voltages"], self.action_voltage_min, self.action_voltage_max)
     
-    def _get_current_voltage_settings(self):
+
+    def _extract_voltage_centers(self, voltages):
         """
-        Get the current voltage settings that the agent controls.
-        
-        Since the agent's action sets the entire 2D sweep for each gate,
-        we can extract the voltage settings by taking the mean across spatial dimensions.
+        Extract the voltage center values from the current voltage configuration.
+        This inverses the process in _apply_voltages by finding the center of each 2D grid.
         
         Returns:
-            np.ndarray: Current voltage settings of shape (3,)
+            tuple: (voltage[0], voltage[1]) representing the center values of the voltage grids
         """
-        current_voltages = self.device_state["current_voltages"]
-        # Take mean across spatial dimensions (0,1) to get the voltage settings
-        voltage_settings = np.mean(current_voltages, axis=(0,1))
-        return voltage_settings
+        
+        # Extract the first two channels (voltage grids)
+        v1_grid = voltages[:, :, 0]  # First voltage grid
+        v2_grid = voltages[:, :, 1]  # Second voltage grid
+        
+        # Calculate the center of each grid by taking the mean
+        # Since the grids are created by adding voltage centers to linspace grids,
+        # the mean of each grid gives us the voltage center
+        voltage_center_1 = np.median(v1_grid)
+        voltage_center_2 = np.median(v2_grid)
+        
+        return np.array([voltage_center_1, voltage_center_2])
          
 
     def render(self):
@@ -523,10 +539,10 @@ if __name__ == "__main__":
     env.reset()
     env.render()  # This will save the initial state plot
     #action = env.action_space.sample()
-    action = np.array([-1.5, -1.5, -0.58])
+    action = np.array([-5.628181, -1.1628181])
     print(action)
     env.step(action)
-    env.render()  # This will save the plot after the action 
+    env.render() # This will save the plot after the action 
     env.close()
 
-    #TODO: work out what that third voltage dim is, note this is being completely ignored for now,just kept as intialised
+    #TODO: this is charge sensor voltage, note this is being completely ignored for now,just kept as intialised
