@@ -82,8 +82,8 @@ class QuantumDeviceEnv(gym.Env):
         
         # Start with conservative bounds based on typical charge sensor data ranges
         # These will be updated as we encounter actual data
-        self.data_min = 0.0
-        self.data_max = 1.0
+        self.data_min = 0.13
+        self.data_max = 0.16
         self.bounds_initialized = False
         
         # Track statistics for adaptive updates
@@ -157,6 +157,7 @@ class QuantumDeviceEnv(gym.Env):
         self._update_normalization_bounds(raw_data)
         
         # Normalize to [0, 1] range
+        print(f"data_min: {self.data_min}, data_max: {self.data_max}")
         normalized = (raw_data - self.data_min) / (self.data_max - self.data_min)
         
         # Clip to ensure values are within bounds
@@ -486,14 +487,18 @@ class QuantumDeviceEnv(gym.Env):
         """
         z, n = self.device_state["model"].charge_sensor_open(self.device_state["current_voltages"])
         
+        # Get the normalized observation that the agent sees
+        channel_data = z[:, :, 0]  # Shape: (height, width)
+        normalized_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
+        normalized_data = normalized_obs[:, :, 0]  # Remove channel dimension for plotting
+        
         # Create figure and plot
-
         vmin, vmax = (self.obs_voltage_min, self.obs_voltage_max)
         num_ticks = 5
         tick_values = np.linspace(vmin, vmax, num_ticks)
 
         fig, ax = plt.subplots(figsize=(8, 6))
-        im = ax.imshow(z[:, :, 0], cmap='viridis', aspect='auto')
+        im = ax.imshow(normalized_data, cmap='viridis', aspect='auto', vmin=0.0, vmax=1.0)
         
         # Set x and y axis ticks to correspond to voltage range
         ax.set_xticks(np.linspace(0, z.shape[1]-1, num_ticks))
@@ -503,12 +508,11 @@ class QuantumDeviceEnv(gym.Env):
         
         ax.set_xlabel("$\Delta$PL (V)")
         ax.set_ylabel("$\Delta$PR (V)")
-        ax.set_title("$|S_{11}|$ (arb.)")
+        ax.set_title("Normalized $|S_{11}|$ (Agent Observation)")
         
         cbar = plt.colorbar(im, ax=ax)
-        c_vmin, c_vmax = im.get_clim()
-        c_tick_values = np.linspace(c_vmin, c_vmax, num_ticks)
-        cbar.set_ticks(list(c_tick_values))
+        cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
+        cbar.set_ticklabels([f"{tick:.2f}" for tick in cbar.get_ticks()])
 
 
         if self.render_mode == "human":
