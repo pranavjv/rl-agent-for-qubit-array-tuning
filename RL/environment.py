@@ -331,9 +331,9 @@ class QuantumDeviceEnv(gym.Env):
         voltages = np.clip(voltages, self.voltage_min, self.voltage_max)
         
         # Update current voltage settings in device state
-        self.device_state["current_voltages"][:,:,0] += voltages[0] 
-        self.device_state["current_voltages"][:,:,1] += voltages[1] 
-        self.device_state["current_voltages"][:,:,2] += voltages[2]
+        self.device_state["current_voltages"][:,:,0] = voltages[0] 
+        self.device_state["current_voltages"][:,:,1] = voltages[1] 
+        self.device_state["current_voltages"][:,:,2] = voltages[2]
         
          
          
