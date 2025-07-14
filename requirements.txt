@@ -8,6 +8,11 @@ matplotlib>=3.5.0
 tqdm>=4.64.0  # for progress bars
 psutil>=5.9.0  # for system monitoring
 
+# Video rendering and analysis dependencies
+imageio>=2.25.0  # for GIF creation
+seaborn>=0.11.0  # for enhanced plotting
+opencv-python>=4.5.0  # for frame overlays (optional)
+
 # Quantum device simulation dependencies
 qarray>=0.1.0
 

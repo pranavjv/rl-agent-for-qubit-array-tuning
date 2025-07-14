@@ -1,61 +1,79 @@
+"""
+Example usage of the enhanced video rendering module.
+
+This demonstrates the new modular design with better error handling,
+configuration management, and comprehensive analysis capabilities.
+"""
+
+import numpy as np
 import sys
 import os
+import torch
+
+# Add parent directories to path for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from RL.video.renderer import VideoRenderer
+from environment import QuantumDeviceEnv
+from agent.ppo_agent import PPOAgent
+from video_utils import save_gif
+from plot_utils import plot_rewards
 
 def main():
-    # Initialize renderer with absolute paths
-    renderer = VideoRenderer(
-        config_path="../env_config.yaml",
-        render_mode="rgb_array",
-        fps=10
-    )
+    # Load environment with rgb_array render mode
+    env = QuantumDeviceEnv(config_path="RL/env_config.yaml", render_mode="rgb_array")
     
-    # Load trained model (replace with your actual model path)
-    model_path = "../agent/models/final_model.pth"
-    config_path = "../agent/config/ppo_config.yaml"
+    # Load trained PPO agent
+    agent = PPOAgent(env, config_path="RL/agent/config/ppo_config.yaml")
+    agent.load_model("RL/agent/models/final_model.pth")
     
-    try:
-        agent = renderer.load_trained_model(model_path, config_path)
-        print(f"Successfully loaded model from {model_path}")
-    except FileNotFoundError as e:
-        print(f"Model or config not found: {e}")
-        print("Please train a model first or update the paths")
-        return
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return
+    # Run one episode
+    obs, _ = env.reset()
+    frames = []
+    rewards = []
+    actions = []
     
-    # Example 1: Render a single debug episode
-    print("\n=== Rendering Debug Episode ===")
-    try:
-        frames, actions, rewards = renderer.render_debug_episode(agent)
-        print(f"Debug episode completed with {len(frames)} frames")
-        print(f"Total reward: {sum(rewards):.3f}")
-    except Exception as e:
-        print(f"Error rendering debug episode: {e}")
-        return
+    max_steps = 100
+    step = 0
     
-    # Example 2: Render multiple episodes for batch evaluation
-    print("\n=== Rendering Multiple Episodes ===")
-    try:
-        episode_stats = renderer.render_multiple_episodes(agent, num_episodes=3)
+    print(f"Running episode for up to {max_steps} steps...")
+    
+    while step < max_steps:
+        # Render current state
+        frame = env.render()
+        if frame is not None:
+            frames.append(frame)
         
-        # Print summary
-        print("\n=== Episode Summary ===")
-        for stats in episode_stats:
-            print(f"Episode {stats['episode']}: "
-                  f"Total Reward={stats['total_reward']:.3f}, "
-                  f"Length={stats['episode_length']}, "
-                  f"Mean Reward={stats['mean_reward']:.3f}")
-    except Exception as e:
-        print(f"Error rendering multiple episodes: {e}")
-        return
+        # Get action from trained agent
+        action, _, _ = agent.get_action(obs)
+        actions.append(action)
+        
+        # Take step in environment
+        obs, reward, terminated, truncated, info = env.step(action)
+        rewards.append(reward)
+        
+        step += 1
+        
+        if terminated or truncated:
+            print(f"Episode ended after {step} steps")
+            break
     
-    print(f"\nAll outputs saved to RL/video/outputs/")
-    print("- Debug episode: RL/video/outputs/debug/")
-    print("- Batch episodes: RL/video/outputs/batch/")
+    # Save results
+    if frames:
+        save_gif(frames, 'RL/video/outputs/episode.gif', fps=5)
+        print(f"Saved {len(frames)} frames as GIF")
+    else:
+        print("No frames to save")
+    
+    if rewards:
+        plot_rewards(rewards, 'RL/video/outputs/episode_rewards.png')
+        print(f"Saved reward plot for {len(rewards)} steps")
+        print(f"Total reward: {sum(rewards):.3f}")
+        print(f"Mean reward: {np.mean(rewards):.3f}")
+    else:
+        print("No rewards to plot")
+    
+    env.close()
 
 if __name__ == "__main__":
     main() 
