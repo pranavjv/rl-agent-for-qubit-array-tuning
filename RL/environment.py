@@ -55,7 +55,7 @@ class QuantumDeviceEnv(gym.Env):
             low=self.obs_normalization_range[0],
             high=self.obs_normalization_range[1],
             shape=(self.obs_image_size[0], self.obs_image_size[1], self.obs_channels),
-            dtype=np.float32
+            dtype=self.obs_dtype
         )
 
         # --- Initialize Model (one-time setup) ---
@@ -329,12 +329,9 @@ class QuantumDeviceEnv(gym.Env):
         """
         
         # Update current voltage settings in device state
-        for i in range(self.num_voltages):
-            self.device_state["current_voltages"][:,:,i] += voltages[i]    # voltage[i] affects gate i (what is the third dimension?)
-
-        # Ensure voltages are within bounds
-        self.device_state["current_voltages"] = np.clip(self.device_state["current_voltages"], self.voltage_min, self.voltage_max)
-    
+        self.device_state["current_voltages"][:,:,0] = voltages[0] 
+        self.device_state["current_voltages"][:,:,1] = voltages[1] 
+        self.device_state["current_voltages"][:,:,2] = voltages[2]
          
 
     def render(self):

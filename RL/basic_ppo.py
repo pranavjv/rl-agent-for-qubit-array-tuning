@@ -177,11 +177,11 @@ class PPO:
         # Sample action
         action = dist.sample()
         
+        # Get log probability of the raw sampled action
+        logprob = dist.log_prob(action).sum()
+        
         # Clip action to valid range
         action = torch.clamp(action, self.act_low, self.act_high)
-        
-        # Get log probability
-        logprob = dist.log_prob(action).sum()
         
         return action.detach().numpy(), logprob.detach()
 
