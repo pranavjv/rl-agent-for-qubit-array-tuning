@@ -27,7 +27,7 @@ network:
 # PPO hyperparameters
 ppo:
   # Training
-  total_timesteps: 100
+  total_timesteps: 10000
   timesteps_per_batch: 1024
   max_timesteps_per_episode: 500
   updates_per_iteration: 5

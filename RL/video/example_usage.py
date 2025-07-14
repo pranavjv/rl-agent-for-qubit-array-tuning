@@ -21,11 +21,11 @@ from plot_utils import plot_rewards
 
 def main():
     # Load environment with rgb_array render mode
-    env = QuantumDeviceEnv(config_path="RL/env_config.yaml", render_mode="rgb_array")
+    env = QuantumDeviceEnv(config_path="../env_config.yaml", render_mode="rgb_array")
     
     # Load trained PPO agent
-    agent = PPOAgent(env, config_path="RL/agent/config/ppo_config.yaml")
-    agent.load_model("RL/agent/models/final_model.pth")
+    agent = PPOAgent(env, config_path="../agent/config/ppo_config.yaml")
+    agent.load_model("../agent/models/final_model.pth")
     
     # Run one episode
     obs, _ = env.reset()
@@ -60,13 +60,13 @@ def main():
     
     # Save results
     if frames:
-        save_gif(frames, 'RL/video/outputs/episode.gif', fps=5)
+        save_gif(frames, 'outputs/episode.gif', fps=5)
         print(f"Saved {len(frames)} frames as GIF")
     else:
         print("No frames to save")
     
     if rewards:
-        plot_rewards(rewards, 'RL/video/outputs/episode_rewards.png')
+        plot_rewards(rewards, 'outputs/episode_rewards.png')
         print(f"Saved reward plot for {len(rewards)} steps")
         print(f"Total reward: {sum(rewards):.3f}")
         print(f"Mean reward: {np.mean(rewards):.3f}")
