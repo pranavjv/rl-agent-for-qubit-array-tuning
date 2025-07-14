@@ -87,7 +87,7 @@ training:
   # Random seed for reproducibility
   seed: 42
   # Enable debug mode
-  debug: true
+  debug: false
   # Frames per second for rendering
   render_fps: 10 
   # Render mode

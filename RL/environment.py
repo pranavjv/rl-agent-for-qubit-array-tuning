@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import yaml
 import os
+import torch
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
 import matplotlib.pyplot as plt
 
@@ -166,7 +167,6 @@ class QuantumDeviceEnv(gym.Env):
         self._update_normalization_bounds(raw_data)
         
         # Normalize to [0, 1] range
-        print(f"data_min: {self.data_min}, data_max: {self.data_max}")
         normalized = (raw_data - self.data_min) / (self.data_max - self.data_min)
         
         # Clip to ensure values are within bounds
@@ -386,14 +386,14 @@ class QuantumDeviceEnv(gym.Env):
         """
         Helper method to get the current observation of the environment.
         
-        Returns a multi-modal observation with image and voltage data that conforms to self.observation_space.
+        Returns a multi-modal observation with image and voltage data as torch tensors.
         """
         # Get current voltage configuration
         current_voltages = self.device_state["current_voltages"]
         
         # Get charge sensor data
-        z = self._get_charge_sensor_data(current_voltages)
-        
+        self.z = self._get_charge_sensor_data(current_voltages)
+        z = self.z
         # Extract first channel and normalize for image observation
         channel_data = z[:, :, 0]  # Shape: (height, width)
         image_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
@@ -401,10 +401,10 @@ class QuantumDeviceEnv(gym.Env):
         # Extract voltage centers for voltage observation
         voltage_centers = self._extract_voltage_centers(current_voltages)  # Shape: (2,)
         
-        # Create multi-modal observation dictionary
+        # Create multi-modal observation dictionary with torch tensors
         observation = {
-            'image': image_obs,
-            'voltages': voltage_centers.astype(np.float32)
+            'image': torch.tensor(image_obs, dtype=torch.float32),
+            'voltages': torch.tensor(voltage_centers, dtype=torch.float32)
         }
         
         # Validate observation structure
@@ -512,8 +512,8 @@ class QuantumDeviceEnv(gym.Env):
         Returns:
             np.ndarray: RGB array representation of the environment state
         """
-        z, n = self.device_state["model"].charge_sensor_open(self.device_state["current_voltages"])
-        
+        z = self.z
+
         # Get the normalized observation that the agent sees
         channel_data = z[:, :, 0]  # Shape: (height, width)
         normalized_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)

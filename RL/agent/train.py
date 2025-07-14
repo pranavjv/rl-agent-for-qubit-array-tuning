@@ -3,6 +3,10 @@ import os
 import argparse
 import yaml
 
+#TODO:
+#Improve debugging printouts
+#Add Wandb logging
+
 # Add parent directory to path to import environment
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

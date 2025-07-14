@@ -10,7 +10,6 @@ import time
 
 try:
     from .networks.multi_modal_net import ActorCriticNetwork
-    from .utils.observation_utils import preprocess_observation, batch_observations
     from .utils.reward_utils import (
         compute_advantages, compute_returns, normalize_advantages,
         compute_policy_loss, compute_value_loss, compute_entropy_bonus,
@@ -19,7 +18,6 @@ try:
 except ImportError:
     # Fallback for direct script execution, was getting an error when running scripts directly
     from networks.multi_modal_net import ActorCriticNetwork
-    from utils.observation_utils import preprocess_observation, batch_observations
     from utils.reward_utils import (
         compute_advantages, compute_returns, normalize_advantages,
         compute_policy_loss, compute_value_loss, compute_entropy_bonus,
@@ -121,20 +119,81 @@ class PPOAgent:
         print(f"  Total parameters: {total_params:,}")
         print(f"  Trainable parameters: {trainable_params:,}")
     
-    def get_action(self, observation: Dict[str, np.ndarray]) -> Tuple[np.ndarray, float, float]:
+    def _prepare_observation(self, observation: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        Prepare observation for network input by moving to device and adding batch dimension.
+        
+        Args:
+            observation: Multi-modal observation as torch tensors
+            
+        Returns:
+            dict: Observation ready for network input
+        """
+        prepared = {}
+        
+        for key, tensor in observation.items():
+            # Move to device
+            tensor = tensor.to(self.device)
+            
+            # Add batch dimension if not present
+            if tensor.ndim == 3:  # (H, W, C) for image
+                tensor = tensor.unsqueeze(0)  # (1, H, W, C)
+            elif tensor.ndim == 1:  # (N,) for voltages
+                tensor = tensor.unsqueeze(0)  # (1, N)
+            
+            prepared[key] = tensor
+        
+        return prepared
+    
+    def _batch_observations(self, observations: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+        """
+        Batch multiple observations into a single tensor batch.
+        
+        Args:
+            observations: List of observation dictionaries with torch tensors
+            
+        Returns:
+            dict: Batched observations
+        """
+        if not observations:
+            raise ValueError("Empty observation list")
+        
+        batched = {}
+        
+        # Get keys from first observation
+        keys = observations[0].keys()
+        
+        for key in keys:
+            # Collect tensors for this key
+            tensors = []
+            for obs in observations:
+                tensor = obs[key].to(self.device)
+                # Add batch dimension if not present
+                if tensor.ndim == 3:  # (H, W, C) for image
+                    tensor = tensor.unsqueeze(0)  # (1, H, W, C)
+                elif tensor.ndim == 1:  # (N,) for voltages
+                    tensor = tensor.unsqueeze(0)  # (1, N)
+                tensors.append(tensor)
+            
+            # Concatenate along batch dimension
+            batched[key] = torch.cat(tensors, dim=0)
+        
+        return batched
+    
+    def get_action(self, observation: Dict[str, torch.Tensor]) -> Tuple[np.ndarray, float, float]:
         """
         Get action from current policy.
         
         Args:
-            observation: Multi-modal observation
+            observation: Multi-modal observation as torch tensors
             
         Returns:
             action: Action to take
             log_prob: Log probability of the action
             value: State value estimate
         """
-        # Preprocess observation
-        obs_tensor = preprocess_observation(observation, str(self.device))
+        # Move observation to device and add batch dimension if needed
+        obs_tensor = self._prepare_observation(observation)
         
         # Get network outputs
         with torch.no_grad():
@@ -160,15 +219,15 @@ class PPOAgent:
             action_np = action_np.flatten()
         return action_np, log_prob.detach().cpu().numpy(), value
     
-    def collect_rollout(self) -> Tuple[List, List, List, List, List]:
+    def collect_rollout(self) -> Tuple[List[Dict[str, torch.Tensor]], List[torch.Tensor], List, List[torch.Tensor], List]:
         """
         Collect a batch of trajectories.
         
         Returns:
-            observations: List of observations
-            actions: List of actions
+            observations: List of observation dictionaries with torch tensors
+            actions: List of action tensors
             rewards: List of rewards
-            log_probs: List of log probabilities
+            log_probs: List of log probability tensors
             values: List of value estimates
         """
         observations, actions, rewards, log_probs, values = [], [], [], [], []
@@ -194,9 +253,9 @@ class PPOAgent:
                 
                 # Store transition
                 episode_observations.append(obs)
-                episode_actions.append(action)
+                episode_actions.append(torch.tensor(action, dtype=torch.float32))
                 episode_rewards.append(reward)
-                episode_log_probs.append(log_prob)
+                episode_log_probs.append(torch.tensor(log_prob, dtype=torch.float32))
                 episode_values.append(value)
                 
                 obs = next_obs
@@ -219,15 +278,15 @@ class PPOAgent:
         
         return observations, actions, rewards, log_probs, values
     
-    def update_policy(self, observations: List, actions: List, 
-                     old_log_probs: List, returns: List, advantages: List):
+    def update_policy(self, observations: List[Dict[str, torch.Tensor]], actions: List[torch.Tensor], 
+                     old_log_probs: List[torch.Tensor], returns: List, advantages: List):
         """
         Update policy using PPO.
         
         Args:
-            observations: Batch of observations
-            actions: Batch of actions
-            old_log_probs: Batch of old log probabilities
+            observations: Batch of observation dictionaries with torch tensors
+            actions: Batch of action tensors
+            old_log_probs: Batch of old log probability tensors
             returns: Batch of returns
             advantages: Batch of advantages
             
@@ -235,9 +294,9 @@ class PPOAgent:
             dict: Training statistics including KL divergence
         """
         # Convert to tensors
-        obs_batch = batch_observations(observations)
-        actions_tensor = torch.tensor(actions, dtype=torch.float32, device=self.device)
-        old_log_probs_tensor = torch.tensor(old_log_probs, dtype=torch.float32, device=self.device)
+        obs_batch = self._batch_observations(observations)
+        actions_tensor = torch.stack(actions).to(self.device)
+        old_log_probs_tensor = torch.stack(old_log_probs).to(self.device)
         returns_tensor = torch.tensor(returns, dtype=torch.float32, device=self.device)
         advantages_tensor = torch.tensor(advantages, dtype=torch.float32, device=self.device)
         
