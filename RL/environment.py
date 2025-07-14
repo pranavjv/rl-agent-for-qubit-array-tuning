@@ -5,6 +5,11 @@ import yaml
 import os
 import torch
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
+
+# Set matplotlib backend before importing pyplot to avoid GUI issues
+import matplotlib
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 
 class QuantumDeviceEnv(gym.Env):
@@ -553,8 +558,24 @@ class QuantumDeviceEnv(gym.Env):
         else:
             # Convert to RGB array for rgb_array mode
             fig.canvas.draw()
-            data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8) #type: ignore
-            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            
+            # Use the correct method for Agg backend
+            try:
+                # Use buffer_rgba() which is available on Agg backend
+                buf = fig.canvas.buffer_rgba()
+                data = np.asarray(buf)
+                # Convert RGBA to RGB by taking only the first 3 channels
+                data = data[:, :, :3]
+            except Exception as e:
+                print(f"Error getting RGB data from canvas: {e}")
+                # Last resort: create a simple colored array
+                height, width = normalized_data.shape
+                data = np.zeros((height, width, 3), dtype=np.uint8)
+                # Create a simple visualization based on the normalized data
+                data[:, :, 0] = (normalized_data * 255).astype(np.uint8)  # Red channel
+                data[:, :, 1] = (normalized_data * 255).astype(np.uint8)  # Green channel
+                data[:, :, 2] = (normalized_data * 255).astype(np.uint8)  # Blue channel
+            
             plt.close()
             return data
  

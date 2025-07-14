@@ -531,8 +531,7 @@ class PPOAgent:
     
     def load_model(self, filename: str):
         """Load model from file."""
-        model_dir = self.config['logging']['model_dir']
-        model_path = os.path.join(model_dir, filename)
+        model_path = filename
         
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
