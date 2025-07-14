@@ -69,7 +69,7 @@ env:
   max_steps: 50
   
   action_space:
-    num_voltages: 3
+    num_voltages: 3  #No longer easy to change, hardcoded in environment.py in update_voltages and in the basic ppo in the action space
     voltage_range: [-2.0, 2.0]
 
     # Window size range for measurement area

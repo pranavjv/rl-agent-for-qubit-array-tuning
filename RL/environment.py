@@ -3,7 +3,6 @@ from gymnasium import spaces
 import numpy as np
 import yaml
 import os
-import qarray
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
 import matplotlib.pyplot as plt
 
@@ -14,7 +13,7 @@ class QuantumDeviceEnv(gym.Env):
     #rendering info
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, config_path='RL/env_config.yaml', render_mode=None):
+    def __init__(self, config_path='env_config.yaml', render_mode=None):
         """
         constructor for the environment
 
@@ -73,6 +72,7 @@ class QuantumDeviceEnv(gym.Env):
         """
         Initialize normalization parameters for consistent scaling across episodes.
         This method samples a few voltage configurations to estimate the data range.
+        Crude way of doing it but solid for now, currently outputs roughly 0.0862 -> 0.2376+-0.001
         """
         if self.debug:
             print("Initializing normalization parameters...")
@@ -191,7 +191,6 @@ class QuantumDeviceEnv(gym.Env):
         self.current_step = 0
         
         # Initialize episode-specific voltage state
-        #need to intialise vg somewhere that makes sense
         vg = self.model.gate_voltage_composer.do2d(
             "vP1", self.config['simulator']['measurement']['vx_min'], self.config['simulator']['measurement']['vx_max'], self.config['simulator']['measurement']['resolution'],
             "vP2", self.config['simulator']['measurement']['vy_min'], self.config['simulator']['measurement']['vy_max'], self.config['simulator']['measurement']['resolution']
@@ -208,7 +207,7 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Return the initial observation ---
         observation = self._get_obs() 
-        info = self._get_info() #TODO: define this
+        info = self._get_info() 
 
         return observation, info
 
