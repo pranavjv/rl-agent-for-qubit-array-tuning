@@ -55,7 +55,7 @@ class QuantumDeviceEnv(gym.Env):
             low=self.obs_normalization_range[0],
             high=self.obs_normalization_range[1],
             shape=(self.obs_image_size[0], self.obs_image_size[1], self.obs_channels),
-            dtype=np.float32
+            dtype=self.obs_dtype
         )
 
         # --- Initialize Model (one-time setup) ---
