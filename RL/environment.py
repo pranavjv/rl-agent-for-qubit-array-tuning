@@ -329,9 +329,8 @@ class QuantumDeviceEnv(gym.Env):
         """
         
         # Update current voltage settings in device state
-        self.device_state["current_voltages"][:,:,0] += voltages[0]    # voltage[0] affects gate 1 (vP1 dimension)
-        self.device_state["current_voltages"][:,:,1] += voltages[1]    # voltage[1] affects gate 2 (vP2 dimension) 
-        self.device_state["current_voltages"][:,:,2] += voltages[2]    # voltage[2] affects gate 3 (third dimension)
+        for i in range(self.num_voltages):
+            self.device_state["current_voltages"][:,:,i] += voltages[i]    # voltage[i] affects gate i (what is the third dimension?)
 
         # Ensure voltages are within bounds
         self.device_state["current_voltages"] = np.clip(self.device_state["current_voltages"], self.voltage_min, self.voltage_max)
