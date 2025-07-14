@@ -18,7 +18,7 @@ simulator:
     Cgs: [[0.03, 0.03, 1]]
     
     # White noise amplitude for charge stability diagram
-    white_noise_amplitude: 0.01
+    white_noise_amplitude: 0.001
     
     # Telegraph noise parameters (random telegraph noise)
     telegraph_noise_parameters:
@@ -53,7 +53,8 @@ simulator:
 
     resolution: 128
     
-    # Optimal gate voltage center for target state
+    # Optimal gate voltage center for target state, note this is not in volts but in charge occupancy
+    #model.optimal_Vg(center) gives the optimal gate voltage in volts from desired charge occupancy
     optimal_VG_center: [1, 1, 0.65]
 
   # Virtual gate transformation matrix

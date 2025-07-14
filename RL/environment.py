@@ -74,59 +74,74 @@ class QuantumDeviceEnv(gym.Env):
 
     def _init_normalization_params(self):
         """
-        Initialize normalization parameters for consistent scaling across episodes.
-        This method samples a few voltage configurations to estimate the data range.
-        Crude way of doing it but solid for now, currently outputs roughly 0.0862 -> 0.2376+-0.001
+        Initialize adaptive normalization parameters.
+        Start with conservative bounds and update them as new data is encountered.
         """
         if self.debug:
-            print("Initializing normalization parameters...")
+            print("Initializing adaptive normalization parameters...")
         
-        # Sample a few voltage center configurations to estimate data range
-        sample_centers = [
-            [0.0, 0.0, 0.0],  # Center
-            [self.action_voltage_min, self.action_voltage_min, self.action_voltage_min],  # Min
-            [self.action_voltage_max, self.action_voltage_max, self.action_voltage_max],  # Max
-        ]
+        # Start with conservative bounds based on typical charge sensor data ranges
+        # These will be updated as we encounter actual data
+        self.data_min = 0.0
+        self.data_max = 1.0
+        self.bounds_initialized = False
         
-        min_val = float('inf')
-        max_val = float('-inf')
+        # Track statistics for adaptive updates
+        self.episode_min = float('inf')
+        self.episode_max = float('-inf')
+        self.global_min = float('inf')
+        self.global_max = float('-inf')
+        self.update_count = 0
         
-        for center in sample_centers:
-            try:
-                # Create 2D voltage grid with this center
-                vg = self.model.gate_voltage_composer.do2d(
-                    "vP1", self.config['simulator']['measurement']['v_min'], self.config['simulator']['measurement']['v_max'], self.config['simulator']['measurement']['resolution'],
-                    "vP2", self.config['simulator']['measurement']['v_min'], self.config['simulator']['measurement']['v_max'], self.config['simulator']['measurement']['resolution']
-                )
-                vg_with_offset = vg + self.model.optimal_Vg(center)
-                
-                z, _ = self.model.charge_sensor_open(vg_with_offset)
-                channel_data = z[:, :, 0]  # First channel
-                min_val = min(min_val, np.min(channel_data))
-                max_val = max(max_val, np.max(channel_data))
-            except Exception as e:
-                if self.debug:
-                    print(f"Warning: Could not sample center {center}: {e}")
-        
-        # Set normalization parameters with some safety margin
-        if min_val != float('inf') and max_val != float('-inf'):
-            self.data_min = min_val
-            self.data_max = max_val
-            # Add small margin to avoid edge cases
-            margin = (max_val - min_val) * 0.01
-            self.data_min -= margin
-            self.data_max += margin
-        else:
-            # Fallback values if sampling fails
-            self.data_min = -1.0
-            self.data_max = 1.0
-            
         if self.debug:
-            print(f"Normalization range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+            print(f"Initial normalization range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+
+    def _update_normalization_bounds(self, raw_data):
+        """
+        Update normalization bounds based on new data encountered.
+        Uses adaptive approach to gradually expand bounds while maintaining stability.
+        
+        Args:
+            raw_data (np.ndarray): Raw charge sensor data
+        """
+        # Update episode statistics
+        self.episode_min = min(self.episode_min, np.min(raw_data))
+        self.episode_max = max(self.episode_max, np.max(raw_data))
+        
+        # Update global statistics
+        self.global_min = min(self.global_min, np.min(raw_data))
+        self.global_max = max(self.global_max, np.max(raw_data))
+        
+        # Check if we need to expand bounds
+        needs_update = False
+        new_min = self.data_min
+        new_max = self.data_max
+        
+        # Expand lower bound if needed (with safety margin)
+        if self.global_min < self.data_min:
+            safety_margin = (self.data_max - self.data_min) * 0.05  # 5% safety margin
+            new_min = self.global_min - safety_margin
+            needs_update = True
+            
+        # Expand upper bound if needed (with safety margin)
+        if self.global_max > self.data_max:
+            safety_margin = (self.data_max - self.data_min) * 0.05  # 5% safety margin
+            new_max = self.global_max + safety_margin
+            needs_update = True
+        
+        # Update bounds if needed
+        if needs_update:
+            self.data_min = new_min
+            self.data_max = new_max
+            self.update_count += 1
+            
+            if self.debug:
+                print(f"Updated normalization bounds to [{self.data_min:.4f}, {self.data_max:.4f}] (update #{self.update_count})")
 
     def _normalize_observation(self, raw_data):
         """
         Normalize the raw charge sensor data to the observation space range.
+        Uses adaptive bounds that update as new data is encountered.
         
         Args:
             raw_data (np.ndarray): Raw charge sensor data of shape (height, width)
@@ -137,6 +152,9 @@ class QuantumDeviceEnv(gym.Env):
         # Ensure input is 2D
         if raw_data.ndim != 2:
             raise ValueError(f"Expected 2D array, got shape {raw_data.shape}")
+        
+        # Update bounds based on new data
+        self._update_normalization_bounds(raw_data)
         
         # Normalize to [0, 1] range
         normalized = (raw_data - self.data_min) / (self.data_max - self.data_min)
@@ -194,6 +212,10 @@ class QuantumDeviceEnv(gym.Env):
         # --- Reset the environment's state ---
         self.current_step = 0
         
+        # Reset episode-specific normalization statistics
+        self.episode_min = float('inf')
+        self.episode_max = float('-inf')
+        
         # Initialize episode-specific voltage state
         vg = self.model.gate_voltage_composer.do2d(
             "vP1", self.config['simulator']['measurement']['v_min'], self.config['simulator']['measurement']['v_max'], self.config['simulator']['measurement']['resolution'],
@@ -201,7 +223,8 @@ class QuantumDeviceEnv(gym.Env):
         )
         
         vg_ground_truth = vg + self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
-        vg = vg_ground_truth.copy()
+
+        # vg = vg_ground_truth.copy() for test copying I was initialising the ground truth voltages to the same as the current voltages
 
 
         # Device state variables (episode-specific)
@@ -383,6 +406,9 @@ class QuantumDeviceEnv(gym.Env):
             "device_state": self.device_state,
             "current_step": self.current_step,
             "normalization_range": [self.data_min, self.data_max],
+            "normalization_updates": self.update_count,
+            "global_data_range": [self.global_min, self.global_max],
+            "episode_data_range": [self.episode_min, self.episode_max],
             "observation_shape": (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels)
         }
 
@@ -425,9 +451,9 @@ class QuantumDeviceEnv(gym.Env):
         v1_grid = voltages[:, :, 0]  # First voltage grid
         v2_grid = voltages[:, :, 1]  # Second voltage grid
         
-        # Calculate the center of each grid by taking the mean
+        # Calculate the center of each grid by taking the median
         # Since the grids are created by adding voltage centers to linspace grids,
-        # the mean of each grid gives us the voltage center
+        # the median of each grid gives us the voltage center
         voltage_center_1 = np.median(v1_grid)
         voltage_center_2 = np.median(v2_grid)
         
