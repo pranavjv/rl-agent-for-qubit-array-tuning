@@ -1,0 +1,14 @@
+# Core dependencies for the quantum device RL agent
+ray==2.47.0
+torch>=1.13.0
+numpy>=1.21.0
+gymnasium==0.28.1  # Required by Ray RLlib 2.8.0
+pyyaml>=6.0
+matplotlib>=3.5.0
+
+# Quantum device simulation dependencies
+qarray>=0.1.0
+
+# Optional: for better performance
+# tensorboard>=2.10.0  # for training visualization
+# wandb>=0.13.0  # for experiment tracking 

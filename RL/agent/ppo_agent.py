@@ -1,0 +1,453 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.distributions.normal import Normal
+import numpy as np
+import yaml
+import os
+from typing import Dict, List, Tuple, Optional
+import time
+
+try:
+    from .networks.multi_modal_net import ActorCriticNetwork
+    from .utils.observation_utils import preprocess_observation, batch_observations
+    from .utils.reward_utils import (
+        compute_advantages, compute_returns, normalize_advantages,
+        compute_policy_loss, compute_value_loss, compute_entropy_bonus,
+        compute_kl_divergence
+    )
+except ImportError:
+    # Fallback for direct script execution, was getting an error when running scripts directly
+    from networks.multi_modal_net import ActorCriticNetwork
+    from utils.observation_utils import preprocess_observation, batch_observations
+    from utils.reward_utils import (
+        compute_advantages, compute_returns, normalize_advantages,
+        compute_policy_loss, compute_value_loss, compute_entropy_bonus,
+        compute_kl_divergence
+    )
+
+
+class PPOAgent:
+    """
+    PPO agent for the qarray env
+    """
+    
+    def __init__(self, env, config_path: str = "config/ppo_config.yaml"):
+        """
+        Initialize PPO agent.
+        
+        Args:
+            env: Gymnasium environment
+            config_path: Path to configuration file
+        """
+        self.env = env
+        self.config = self._load_config(config_path)
+        
+        # Set device
+        self.device = self._setup_device()
+        
+        # Initialize network
+        self.network = self._create_network()
+        
+        # Initialize optimizers
+        self.actor_optimizer = optim.Adam(
+            self.network.parameters(),
+            lr=float(self.config['ppo']['actor_lr']),
+            betas=(float(self.config['optimization']['beta1']), float(self.config['optimization']['beta2'])),
+            eps=float(self.config['optimization']['eps'])
+        )
+        
+        # Initialize action distribution parameters
+        self.log_std = nn.Parameter(torch.zeros(self.config['network']['action_dim']))
+        self.actor_optimizer.add_param_group({
+            'params': [self.log_std],
+            'lr': float(self.config['ppo']['actor_lr'])
+        })
+        
+        # Training state
+        self.total_timesteps = 0
+        self.iteration = 0
+        self.best_reward = float('-inf')
+        
+        # Debug info
+        if self.config['debug']['print_network_info']:
+            self._print_network_info()
+    
+    def _load_config(self, config_path: str) -> Dict:
+        """Load configuration from YAML file."""
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        return config
+    
+    def _setup_device(self) -> torch.device:
+        """Setup device (CPU/GPU)."""
+        if self.config['device']['use_cuda'] and torch.cuda.is_available():
+            device = torch.device(f"cuda:{self.config['device']['device_id']}")
+            print(f"Using CUDA device: {device}")
+        else:
+            device = torch.device("cpu")
+            print("Using CPU device")
+        
+        return device
+    
+    def _create_network(self) -> ActorCriticNetwork:
+        """Create the actor-critic network."""
+        network_config = self.config['network']
+        
+        network = ActorCriticNetwork(
+            image_shape=tuple(network_config['image_shape']),
+            voltage_dim=int(network_config['voltage_dim']),
+            hidden_dim=int(network_config['fusion_hidden_dim']),
+            action_dim=int(network_config['action_dim'])
+        ).to(self.device)
+        
+        return network
+    
+    def _print_network_info(self):
+        """Print network architecture information. Useful for debugging."""
+        print("Network Architecture:")
+        print(f"  Image shape: {self.config['network']['image_shape']}")
+        print(f"  Voltage dim: {self.config['network']['voltage_dim']}")
+        print(f"  Action dim: {self.config['network']['action_dim']}")
+        print(f"  Hidden dim: {self.config['network']['fusion_hidden_dim']}")
+        
+        # Count parameters
+        total_params = sum(p.numel() for p in self.network.parameters())
+        trainable_params = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
+        print(f"  Total parameters: {total_params:,}")
+        print(f"  Trainable parameters: {trainable_params:,}")
+    
+    def get_action(self, observation: Dict[str, np.ndarray]) -> Tuple[np.ndarray, float, float]:
+        """
+        Get action from current policy.
+        
+        Args:
+            observation: Multi-modal observation
+            
+        Returns:
+            action: Action to take
+            log_prob: Log probability of the action
+            value: State value estimate
+        """
+        # Preprocess observation
+        obs_tensor = preprocess_observation(observation, str(self.device))
+        
+        # Get network outputs
+        with torch.no_grad():
+            actor_output, critic_output = self.network(obs_tensor)
+            value = critic_output.squeeze().detach().cpu().numpy()
+        
+        # Create action distribution
+        std = torch.exp(self.log_std)
+        dist = Normal(actor_output, std)
+        
+        # Sample action
+        action = dist.sample()
+        log_prob = dist.log_prob(action).sum(dim=-1)
+        
+        # Clip action to valid range
+        action_low = torch.tensor(self.env.action_space.low, device=self.device)
+        action_high = torch.tensor(self.env.action_space.high, device=self.device)
+        action = torch.clamp(action, action_low, action_high)
+        
+        # Always return a 1D action
+        action_np = action.cpu().numpy().squeeze()
+        if action_np.ndim > 1:
+            action_np = action_np.flatten()
+        return action_np, log_prob.detach().cpu().numpy(), value
+    
+    def collect_rollout(self) -> Tuple[List, List, List, List, List]:
+        """
+        Collect a batch of trajectories.
+        
+        Returns:
+            observations: List of observations
+            actions: List of actions
+            rewards: List of rewards
+            log_probs: List of log probabilities
+            values: List of value estimates
+        """
+        observations, actions, rewards, log_probs, values = [], [], [], [], []
+        
+        timesteps_collected = 0
+        timesteps_per_batch = self.config['ppo']['timesteps_per_batch']
+        max_timesteps_per_episode = self.config['ppo']['max_timesteps_per_episode']
+        
+        while timesteps_collected < timesteps_per_batch:
+            obs, _ = self.env.reset()
+            episode_rewards = []
+            episode_observations = []
+            episode_actions = []
+            episode_log_probs = []
+            episode_values = []
+            
+            for step in range(max_timesteps_per_episode):
+                # Get action from policy
+                action, log_prob, value = self.get_action(obs)
+                
+                # Take action in environment
+                next_obs, reward, terminated, truncated, _ = self.env.step(action)
+                
+                # Store transition
+                episode_observations.append(obs)
+                episode_actions.append(action)
+                episode_rewards.append(reward)
+                episode_log_probs.append(log_prob)
+                episode_values.append(value)
+                
+                obs = next_obs
+                timesteps_collected += 1
+                
+                # Check if episode is done
+                if terminated or truncated:
+                    break
+                
+                # Check if we've collected enough timesteps
+                if timesteps_collected >= timesteps_per_batch:
+                    break
+            
+            # Extend batch with episode data
+            observations.extend(episode_observations)
+            actions.extend(episode_actions)
+            rewards.extend(episode_rewards)
+            log_probs.extend(episode_log_probs)
+            values.extend(episode_values)
+        
+        return observations, actions, rewards, log_probs, values
+    
+    def update_policy(self, observations: List, actions: List, 
+                     old_log_probs: List, returns: List, advantages: List):
+        """
+        Update policy using PPO.
+        
+        Args:
+            observations: Batch of observations
+            actions: Batch of actions
+            old_log_probs: Batch of old log probabilities
+            returns: Batch of returns
+            advantages: Batch of advantages
+            
+        Returns:
+            dict: Training statistics including KL divergence
+        """
+        # Convert to tensors
+        obs_batch = batch_observations(observations)
+        actions_tensor = torch.tensor(actions, dtype=torch.float32, device=self.device)
+        old_log_probs_tensor = torch.tensor(old_log_probs, dtype=torch.float32, device=self.device)
+        returns_tensor = torch.tensor(returns, dtype=torch.float32, device=self.device)
+        advantages_tensor = torch.tensor(advantages, dtype=torch.float32, device=self.device)
+        
+        # Normalize advantages if configured
+        if self.config['ppo']['normalize_advantages']:
+            advantages_tensor = torch.tensor(normalize_advantages(advantages_tensor.cpu().numpy()), device=self.device)
+        
+        # Multiple update iterations
+        updates_per_iteration = self.config['ppo']['updates_per_iteration']
+        max_kl_div = self.config['ppo']['max_kl_div']
+        
+        # Training statistics
+        training_stats = {
+            'policy_losses': [],
+            'value_losses': [],
+            'entropy_bonuses': [],
+            'kl_divergences': [],
+            'early_stop_update': None
+        }
+        
+        for update in range(updates_per_iteration):
+            # Forward pass
+            actor_output, critic_output = self.network(obs_batch)
+            
+            # Create action distribution
+            std = torch.exp(self.log_std)
+            dist = Normal(actor_output, std)
+            
+            # Compute new log probabilities
+            new_log_probs = dist.log_prob(actions_tensor).sum(dim=-1)
+            
+            # Compute KL divergence for monitoring
+            kl_div = compute_kl_divergence(old_log_probs_tensor, new_log_probs)
+            training_stats['kl_divergences'].append(kl_div.item())
+            
+            # Early stopping if KL divergence is too high
+            if kl_div > max_kl_div:
+                if self.config['debug']['verbose']:
+                    print(f"  Early stopping at update {update + 1}/{updates_per_iteration} "
+                          f"due to high KL divergence: {kl_div.item():.4f} > {max_kl_div}")
+                training_stats['early_stop_update'] = update + 1
+                break
+            
+            # Compute losses
+            policy_loss = compute_policy_loss(
+                advantages_tensor, old_log_probs_tensor, new_log_probs,
+                self.config['ppo']['epsilon']
+            )
+            
+            value_loss = compute_value_loss(
+                critic_output.squeeze(), returns_tensor,
+                self.config['ppo']['value_clip_ratio']
+            )
+            
+            entropy_bonus = compute_entropy_bonus(
+                new_log_probs, self.config['ppo']['entropy_coef']
+            )
+            
+            # Store losses for logging
+            training_stats['policy_losses'].append(policy_loss.item())
+            training_stats['value_losses'].append(value_loss.item())
+            training_stats['entropy_bonuses'].append(entropy_bonus.item())
+            
+            # Total loss
+            total_loss = policy_loss + 0.5 * value_loss - entropy_bonus
+            
+            # Backward pass
+            self.actor_optimizer.zero_grad()
+            total_loss.backward()
+            
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(
+                self.network.parameters(), 
+                self.config['optimization']['max_grad_norm']
+            )
+            
+            self.actor_optimizer.step()
+        
+        return training_stats
+    
+    def train(self):
+        """Main training loop."""
+        total_timesteps = self.config['ppo']['total_timesteps']
+        log_interval = self.config['logging']['log_interval']
+        
+        print(f"Starting training for {total_timesteps} timesteps...")
+        
+        while self.total_timesteps < total_timesteps:
+            # Collect rollout
+            observations, actions, rewards, log_probs, values = self.collect_rollout()
+            
+            # Compute returns and advantages
+            returns = compute_returns(rewards, self.config['ppo']['gamma'])
+            advantages = compute_advantages(
+                rewards, values, 
+                self.config['ppo']['gamma'], 
+                self.config['ppo']['gae_lambda']
+            )
+            
+            # Update policy
+            training_stats = self.update_policy(observations, actions, log_probs, list(returns), list(advantages))
+        
+            # Update counters
+            self.total_timesteps += len(rewards)
+            self.iteration += 1
+            
+            # Logging
+            if self.iteration % log_interval == 0:
+                mean_reward = np.mean(rewards)
+                mean_return = np.mean(returns)
+                mean_advantage = np.mean(advantages)
+                
+                # KL divergence statistics
+                kl_divs = training_stats['kl_divergences']
+                mean_kl_div = np.mean(kl_divs) if kl_divs else 0.0
+                max_kl_div = np.max(kl_divs) if kl_divs else 0.0
+                
+                # Loss statistics
+                mean_policy_loss = np.mean(training_stats['policy_losses']) if training_stats['policy_losses'] else 0.0
+                mean_value_loss = np.mean(training_stats['value_losses']) if training_stats['value_losses'] else 0.0
+                
+                print(f"Iteration {self.iteration}")
+                print(f"  Timesteps: {self.total_timesteps:,}/{total_timesteps:,}")
+                print(f"  Mean reward: {mean_reward:.3f}")
+                print(f"  Mean return: {mean_return:.3f}")
+                print(f"  Mean advantage: {mean_advantage:.3f}")
+                print(f"  Policy updates: {len(kl_divs)}/{self.config['ppo']['updates_per_iteration']}")
+                print(f"  Mean KL divergence: {mean_kl_div:.4f}")
+                print(f"  Max KL divergence: {max_kl_div:.4f}")
+                print(f"  Mean policy loss: {mean_policy_loss:.4f}")
+                print(f"  Mean value loss: {mean_value_loss:.4f}")
+                
+                if training_stats['early_stop_update']:
+                    print(f"  Early stopped at update {training_stats['early_stop_update']}")
+                
+                print(f"  Episodes in batch: {len(rewards) // self.config['ppo']['max_timesteps_per_episode']}")
+                print()
+                
+                # Update best reward
+                if mean_reward > self.best_reward:
+                    self.best_reward = mean_reward
+                    if self.config['logging']['save_best_only']:
+                        self.save_model("best_model.pth")
+        
+        print("Training completed!")
+    
+    def save_model(self, filename: str):
+        """Save model to file."""
+        model_dir = self.config['logging']['model_dir']
+        os.makedirs(model_dir, exist_ok=True)
+        
+        model_path = os.path.join(model_dir, filename)
+        torch.save({
+            'network_state_dict': self.network.state_dict(),
+            'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
+            'log_std': self.log_std.data,
+            'config': self.config,
+            'iteration': self.iteration,
+            'total_timesteps': self.total_timesteps,
+            'best_reward': self.best_reward
+        }, model_path)
+        
+        print(f"Model saved to {model_path}")
+    
+    def load_model(self, filename: str):
+        """Load model from file."""
+        model_dir = self.config['logging']['model_dir']
+        model_path = os.path.join(model_dir, filename)
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        
+        checkpoint = torch.load(model_path, map_location=self.device)
+        
+        self.network.load_state_dict(checkpoint['network_state_dict'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.log_std.data = checkpoint['log_std']
+        
+        self.iteration = checkpoint.get('iteration', 0)
+        self.total_timesteps = checkpoint.get('total_timesteps', 0)
+        self.best_reward = checkpoint.get('best_reward', float('-inf'))
+        
+        print(f"Model loaded from {model_path}")
+    
+    def evaluate(self, num_episodes: int = 10) -> Dict:
+        """Evaluate the current policy."""
+        episode_rewards = []
+        episode_lengths = []
+        
+        for episode in range(num_episodes):
+            obs, _ = self.env.reset()
+            episode_reward = 0
+            episode_length = 0
+            
+            while True:
+                action, _, _ = self.get_action(obs)
+                obs, reward, terminated, truncated, _ = self.env.step(action)
+                
+                episode_reward += reward
+                episode_length += 1
+                
+                if terminated or truncated:
+                    break
+            
+            episode_rewards.append(episode_reward)
+            episode_lengths.append(episode_length)
+        
+        return {
+            'mean_reward': np.mean(episode_rewards),
+            'std_reward': np.std(episode_rewards),
+            'mean_length': np.mean(episode_lengths),
+            'episode_rewards': episode_rewards
+        } 
