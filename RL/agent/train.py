@@ -32,6 +32,8 @@ def main():
                        help="Path to model to load for evaluation")
     parser.add_argument("--num-eval-episodes", type=int, default=10,
                        help="Number of episodes for evaluation")
+    parser.add_argument("--save-final", action="store_true", default=True,
+                       help="Save final model after training (default: True)")
     
     args = parser.parse_args()
     
@@ -42,6 +44,7 @@ def main():
     # Initialize agent
     print("Initializing PPO agent...")
     agent = PPOAgent(env, config_path=args.config)
+    agent.save_final_model = args.save_final
     
     if args.eval_only:
         # Evaluation mode

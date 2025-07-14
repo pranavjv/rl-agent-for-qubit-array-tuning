@@ -68,6 +68,7 @@ class PPOAgent:
         self.total_timesteps = 0
         self.iteration = 0
         self.best_reward = float('-inf')
+        self.save_final_model = self.config['logging'].get('save_final_model', True)
         
         # Debug info
         if self.config['debug']['print_network_info']:
@@ -505,6 +506,10 @@ class PPOAgent:
         print(f"  - Total iterations: {self.iteration}")
         print(f"  - Total timesteps: {self.total_timesteps}")
         print(f"  - Best mean reward: {self.best_reward:.3f}")
+        
+        # Save final model
+        if hasattr(self, 'save_final_model') and self.save_final_model:
+            self.save_model("final_model.pth")
     
     def save_model(self, filename: str):
         """Save model to file."""
