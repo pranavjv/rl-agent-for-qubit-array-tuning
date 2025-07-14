@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.distributions.categorical import Categorical
+from torch.distributions.normal import Normal
 
 class PPO:
     def __init__(self, network, env):
@@ -16,13 +16,18 @@ class PPO:
         """
 
         self.env = env
-        self.obs_dim = env.observation_space.shape[0]
+        self.obs_dim = env.observation_space.shape[0] if hasattr(env.observation_space, 'shape') else None
         self.act_dim = env.action_space.shape[0]
+        self.act_low = env.action_space.low
+        self.act_high = env.action_space.high
 
         self.actor = network(self.obs_dim, self.act_dim)
         self.critic = network(self.obs_dim, 1)
 
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), self.lr)
+        #made this a parameter so that it can be optimized
+        self.log_std = nn.Parameter(torch.zeros(self.act_dim))
+
+        self.actor_optim = torch.optim.Adam(list(self.actor.parameters()) + [self.log_std], self.lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), self.lr)
 
         self.loss_fn = nn.MSELoss()
@@ -62,7 +67,7 @@ class PPO:
 
                 V, current_logprobs = self.evaluate(obs, acts)
 
-                ratios = torch.exp(current_logprobs - logprobs) # updated policy to current policy
+                ratios = torch.exp(current_logprobs - logprobs) # updated policy to current policy
 
                 loss1 = ratios * A
                 loss2 = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon) * A
@@ -158,10 +163,26 @@ class PPO:
             action: action to take
             logprob: log prob of the action selected from distribution
         """
-        logits = self.actor(state)
-        dist = Categorical(logits=logits)
+        # convert state to tensor just in case it's not already
+        if not isinstance(state, torch.Tensor):
+            state = torch.tensor(state, dtype=torch.float32)
+        
+        # Get action mean
+        mean = self.actor(state)
+        
+        # Create normal distribution with fixed std
+        std = torch.exp(self.log_std)
+        dist = Normal(mean, std)
+        
+        # Sample action
         action = dist.sample()
-        logprob = dist.log_prob(action)
+        
+        # Get log probability of the raw sampled action
+        logprob = dist.log_prob(action).sum()
+        
+        # Clip action to valid range
+        action = torch.clamp(action, self.act_low, self.act_high)
+        
         return action.detach().numpy(), logprob.detach()
 
 
@@ -179,9 +200,15 @@ class PPO:
         """
         V = self.critic(states).squeeze()
 
-        logits = self.actor(states)
-        dist = Categorical(logits=logits)
-        logprobs = dist.log_prob(actions)
+        # Get action mean from actor network
+        mean = self.actor(states)
+        
+        # Create normal distribution with fixed std
+        std = torch.exp(self.log_std)
+        dist = Normal(mean, std)
+        
+        # Get log probabilities
+        logprobs = dist.log_prob(actions).sum(dim=-1)
 
         return V, logprobs
 
