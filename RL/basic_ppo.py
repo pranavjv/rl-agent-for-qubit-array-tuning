@@ -4,6 +4,10 @@ import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
 
+#TODO:
+# - add a voltage observation space
+
+
 class PPO:
     def __init__(self, network, env):
         """

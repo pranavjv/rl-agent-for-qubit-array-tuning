@@ -45,19 +45,28 @@ class QuantumDeviceEnv(gym.Env):
             dtype=np.float32
         )
 
-        # Observation space for quantum device state - 1-channel 128x128 image
+        # Observation space for quantum device state - multi-modal with image and voltages
         obs_config = self.config['env']['observation_space']
         self.obs_image_size = obs_config['image_size']
         self.obs_channels = obs_config['channels']
         self.obs_normalization_range = obs_config['normalization_range']
         self.obs_dtype = obs_config['dtype']
         
-        self.observation_space = spaces.Box(
-            low=self.obs_normalization_range[0],
-            high=self.obs_normalization_range[1],
-            shape=(self.obs_image_size[0], self.obs_image_size[1], self.obs_channels),
-            dtype=self.obs_dtype
-        )
+        # Define multi-modal observation space using Dict
+        self.observation_space = spaces.Dict({
+            'image': spaces.Box(
+                low=self.obs_normalization_range[0],
+                high=self.obs_normalization_range[1],
+                shape=(self.obs_image_size[0], self.obs_image_size[1], self.obs_channels),
+                dtype=self.obs_dtype
+            ),
+            'voltages': spaces.Box(
+                low=self.action_voltage_min,
+                high=self.action_voltage_max,
+                shape=(self.num_voltages,),
+                dtype=np.float32
+            )
+        })
 
         self.obs_voltage_min = self.config['simulator']['measurement']['v_min']
         self.obs_voltage_max = self.config['simulator']['measurement']['v_max']
@@ -377,7 +386,7 @@ class QuantumDeviceEnv(gym.Env):
         """
         Helper method to get the current observation of the environment.
         
-        Returns a normalized 1-channel image observation that conforms to self.observation_space.
+        Returns a multi-modal observation with image and voltage data that conforms to self.observation_space.
         """
         # Get current voltage configuration
         current_voltages = self.device_state["current_voltages"]
@@ -385,14 +394,28 @@ class QuantumDeviceEnv(gym.Env):
         # Get charge sensor data
         z = self._get_charge_sensor_data(current_voltages)
         
-        # Extract first channel and normalize
+        # Extract first channel and normalize for image observation
         channel_data = z[:, :, 0]  # Shape: (height, width)
-        observation = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
+        image_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
         
-        # Validate observation shape
-        expected_shape = (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels)
-        if observation.shape != expected_shape:
-            raise ValueError(f"Observation shape {observation.shape} does not match expected {expected_shape}")
+        # Extract voltage centers for voltage observation
+        voltage_centers = self._extract_voltage_centers(current_voltages)  # Shape: (2,)
+        
+        # Create multi-modal observation dictionary
+        observation = {
+            'image': image_obs,
+            'voltages': voltage_centers.astype(np.float32)
+        }
+        
+        # Validate observation structure
+        expected_image_shape = (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels)
+        expected_voltage_shape = (self.num_voltages,)
+        
+        if observation['image'].shape != expected_image_shape:
+            raise ValueError(f"Image observation shape {observation['image'].shape} does not match expected {expected_image_shape}")
+        
+        if observation['voltages'].shape != expected_voltage_shape:
+            raise ValueError(f"Voltage observation shape {observation['voltages'].shape} does not match expected {expected_voltage_shape}")
         
         return observation
 
@@ -410,7 +433,11 @@ class QuantumDeviceEnv(gym.Env):
             "normalization_updates": self.update_count,
             "global_data_range": [self.global_min, self.global_max],
             "episode_data_range": [self.episode_min, self.episode_max],
-            "observation_shape": (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels)
+            "observation_structure": {
+                "image_shape": (self.obs_image_size[0], self.obs_image_size[1], self.obs_channels),
+                "voltage_shape": (self.num_voltages,),
+                "total_modalities": 2
+            }
         }
 
     def _apply_voltages(self, voltages):
