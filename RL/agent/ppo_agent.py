@@ -7,6 +7,8 @@ import yaml
 import os
 from typing import Dict, List, Tuple, Optional
 import time
+from tqdm import tqdm
+import psutil
 
 try:
     from .networks.multi_modal_net import ActorCriticNetwork
@@ -236,7 +238,12 @@ class PPOAgent:
         timesteps_per_batch = self.config['ppo']['timesteps_per_batch']
         max_timesteps_per_episode = self.config['ppo']['max_timesteps_per_episode']
         
+        # Progress bar for rollout collection
+        rollout_pbar = tqdm(total=timesteps_per_batch, desc="Collecting rollout", unit="timesteps", leave=False)
+        
+        episode_count = 0
         while timesteps_collected < timesteps_per_batch:
+            episode_count += 1
             obs, _ = self.env.reset()
             episode_rewards = []
             episode_observations = []
@@ -244,6 +251,7 @@ class PPOAgent:
             episode_log_probs = []
             episode_values = []
             
+            episode_timesteps = 0
             for step in range(max_timesteps_per_episode):
                 # Get action from policy
                 action, log_prob, value = self.get_action(obs)
@@ -260,6 +268,7 @@ class PPOAgent:
                 
                 obs = next_obs
                 timesteps_collected += 1
+                episode_timesteps += 1
                 
                 # Check if episode is done
                 if terminated or truncated:
@@ -269,6 +278,14 @@ class PPOAgent:
                 if timesteps_collected >= timesteps_per_batch:
                     break
             
+            # Update progress bar
+            rollout_pbar.update(episode_timesteps)
+            rollout_pbar.set_postfix({
+                'episodes': episode_count,
+                'collected': timesteps_collected,
+                'target': timesteps_per_batch
+            })
+            
             # Extend batch with episode data
             observations.extend(episode_observations)
             actions.extend(episode_actions)
@@ -276,6 +293,7 @@ class PPOAgent:
             log_probs.extend(episode_log_probs)
             values.extend(episode_values)
         
+        rollout_pbar.close()
         return observations, actions, rewards, log_probs, values
     
     def update_policy(self, observations: List[Dict[str, torch.Tensor]], actions: List[torch.Tensor], 
@@ -317,7 +335,10 @@ class PPOAgent:
             'early_stop_update': None
         }
         
-        for update in range(updates_per_iteration):
+        # Progress bar for policy updates
+        update_pbar = tqdm(range(updates_per_iteration), desc="Policy updates", leave=False)
+        
+        for update in update_pbar:
             # Forward pass
             actor_output, critic_output = self.network(obs_batch)
             
@@ -338,6 +359,7 @@ class PPOAgent:
                     print(f"  Early stopping at update {update + 1}/{updates_per_iteration} "
                           f"due to high KL divergence: {kl_div.item():.4f} > {max_kl_div}")
                 training_stats['early_stop_update'] = update + 1
+                update_pbar.close()
                 break
             
             # Compute losses
@@ -375,6 +397,7 @@ class PPOAgent:
             
             self.actor_optimizer.step()
         
+        update_pbar.close()
         return training_stats
     
     def train(self):
@@ -383,56 +406,92 @@ class PPOAgent:
         log_interval = self.config['logging']['log_interval']
         
         print(f"Starting training for {total_timesteps} timesteps...")
+        print(f"Configuration:")
+        print(f"  - Timesteps per batch: {self.config['ppo']['timesteps_per_batch']}")
+        print(f"  - Max timesteps per episode: {self.config['ppo']['max_timesteps_per_episode']}")
+        print(f"  - Updates per iteration: {self.config['ppo']['updates_per_iteration']}")
+        print()
+        
+        # Memory monitoring function
+        def get_memory_usage():
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            return memory_info.rss / 1024 / 1024  # MB
+        
+        # Create progress bar for overall training
         
         while self.total_timesteps < total_timesteps:
-            # Collect rollout
+            # Collect rollout with progress indication
+            start_time = time.time()
             observations, actions, rewards, log_probs, values = self.collect_rollout()
+            rollout_time = time.time() - start_time
+            
+            # Calculate rollout statistics
+            timesteps_collected = len(rewards)
+            num_episodes = timesteps_collected  # Since each episode = 1 timestep
+            mean_reward = np.mean(rewards)
+            
+            print(f"\n=== Iteration {self.iteration + 1} ===")
+            print(f"Rollout Collection:")
+            print(f"  - Timesteps collected: {timesteps_collected}")
+            print(f"  - Episodes run: {num_episodes}")
+            print(f"  - Mean reward: {mean_reward:.3f}")
+            print(f"  - Time taken: {rollout_time:.2f}s")
             
             # Compute returns and advantages
+            print("Computing returns and advantages...")
+            start_time = time.time()
             returns = compute_returns(rewards, self.config['ppo']['gamma'])
             advantages = compute_advantages(
                 rewards, values, 
                 self.config['ppo']['gamma'], 
                 self.config['ppo']['gae_lambda']
             )
+            compute_time = time.time() - start_time
+            print(f"  - Time taken: {compute_time:.2f}s")
             
-            # Update policy
+            # Update policy with progress indication
+            print("Updating policy...")
+            start_time = time.time()
             training_stats = self.update_policy(observations, actions, log_probs, list(returns), list(advantages))
+            update_time = time.time() - start_time
+            
+            # Calculate policy update statistics
+            num_updates = len(training_stats['kl_divergences'])
+            mean_kl_div = np.mean(training_stats['kl_divergences']) if training_stats['kl_divergences'] else 0.0
+            mean_policy_loss = np.mean(training_stats['policy_losses']) if training_stats['policy_losses'] else 0.0
+            mean_value_loss = np.mean(training_stats['value_losses']) if training_stats['value_losses'] else 0.0
+            
+            print(f"  - Policy updates performed: {num_updates}/{self.config['ppo']['updates_per_iteration']}")
+            print(f"  - Mean KL divergence: {mean_kl_div:.4f}")
+            print(f"  - Mean policy loss: {mean_policy_loss:.4f}")
+            print(f"  - Mean value loss: {mean_value_loss:.4f}")
+            print(f"  - Time taken: {update_time:.2f}s")
         
             # Update counters
-            self.total_timesteps += len(rewards)
+            timesteps_this_iteration = len(rewards)
+            self.total_timesteps += timesteps_this_iteration
             self.iteration += 1
+            
+            
             
             # Logging
             if self.iteration % log_interval == 0:
-                mean_reward = np.mean(rewards)
                 mean_return = np.mean(returns)
                 mean_advantage = np.mean(advantages)
                 
                 # KL divergence statistics
-                kl_divs = training_stats['kl_divergences']
-                mean_kl_div = np.mean(kl_divs) if kl_divs else 0.0
-                max_kl_div = np.max(kl_divs) if kl_divs else 0.0
+                max_kl_div = np.max(training_stats['kl_divergences']) if training_stats['kl_divergences'] else 0.0
                 
-                # Loss statistics
-                mean_policy_loss = np.mean(training_stats['policy_losses']) if training_stats['policy_losses'] else 0.0
-                mean_value_loss = np.mean(training_stats['value_losses']) if training_stats['value_losses'] else 0.0
-                
-                print(f"Iteration {self.iteration}")
+                print(f"\n--- Logging Interval {self.iteration // log_interval} ---")
                 print(f"  Timesteps: {self.total_timesteps:,}/{total_timesteps:,}")
-                print(f"  Mean reward: {mean_reward:.3f}")
                 print(f"  Mean return: {mean_return:.3f}")
                 print(f"  Mean advantage: {mean_advantage:.3f}")
-                print(f"  Policy updates: {len(kl_divs)}/{self.config['ppo']['updates_per_iteration']}")
-                print(f"  Mean KL divergence: {mean_kl_div:.4f}")
                 print(f"  Max KL divergence: {max_kl_div:.4f}")
-                print(f"  Mean policy loss: {mean_policy_loss:.4f}")
-                print(f"  Mean value loss: {mean_value_loss:.4f}")
                 
                 if training_stats['early_stop_update']:
                     print(f"  Early stopped at update {training_stats['early_stop_update']}")
                 
-                print(f"  Episodes in batch: {len(rewards) // self.config['ppo']['max_timesteps_per_episode']}")
                 print()
                 
                 # Update best reward
@@ -441,7 +500,11 @@ class PPOAgent:
                     if self.config['logging']['save_best_only']:
                         self.save_model("best_model.pth")
         
-        print("Training completed!")
+        print("\nTraining completed!")
+        print(f"Final statistics:")
+        print(f"  - Total iterations: {self.iteration}")
+        print(f"  - Total timesteps: {self.total_timesteps}")
+        print(f"  - Best mean reward: {self.best_reward:.3f}")
     
     def save_model(self, filename: str):
         """Save model to file."""

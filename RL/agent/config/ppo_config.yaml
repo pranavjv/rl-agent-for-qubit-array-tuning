@@ -27,10 +27,10 @@ network:
 # PPO hyperparameters
 ppo:
   # Training
-  total_timesteps: 1000
-  timesteps_per_batch: 2048
+  total_timesteps: 100
+  timesteps_per_batch: 1024
   max_timesteps_per_episode: 500
-  updates_per_iteration: 10
+  updates_per_iteration: 5
   
   # Learning rates
   actor_lr: 3e-4
