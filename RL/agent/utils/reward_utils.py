@@ -23,7 +23,7 @@ def compute_advantages(rewards: List[float],
     rewards_array = np.array(rewards)
     values_array = np.array(values)
     
-    advantages = np.zeros_like(rewards)
+    advantages = np.zeros_like(rewards_array)
     last_advantage = 0
     
     for t in reversed(range(len(rewards))):
