@@ -10,15 +10,11 @@ import sys
 import os
 import torch
 
-# Add parent directories to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
-from environment import QuantumDeviceEnv
-from agent.ppo_agent import PPOAgent
-from video_utils import save_gif
-from plot_utils import plot_rewards
-
+# Import modules using relative imports
+from ..environment import QuantumDeviceEnv
+from ..agent.ppo_agent import PPOAgent
+from .video_utils import save_gif
+from .plot_utils import plot_rewards
 def main():
     # Load environment with rgb_array render mode
     env = QuantumDeviceEnv(config_path="../env_config.yaml", render_mode="rgb_array")
