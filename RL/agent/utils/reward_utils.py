@@ -54,7 +54,8 @@ def compute_returns(rewards: List[float], gamma: float = 0.95) -> np.ndarray:
     Returns:
         np.ndarray: Discounted returns
     """
-    returns = np.zeros_like(rewards)
+    rewards_array = np.array(rewards)
+    returns = np.zeros_like(rewards_array)
     running_return = 0
     
     for t in reversed(range(len(rewards))):
