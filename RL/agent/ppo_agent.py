@@ -429,7 +429,7 @@ class PPOAgent:
             
             # Calculate rollout statistics
             timesteps_collected = len(rewards)
-            num_episodes = timesteps_collected  # Since each episode = 1 timestep
+            num_episodes = 0 #not yet implemented
             mean_reward = np.mean(rewards)
             
             print(f"\n=== Iteration {self.iteration + 1} ===")
