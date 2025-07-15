@@ -7,3 +7,5 @@ Deep RL for bias triangle finding: https://www.nature.com/articles/s41534-021-00
 Model based RL for autotuning: https://pubs.aip.org/aip/aml/article/3/1/016114/3339666/Environment-model-construction-toward-auto-tuning
 
 Decision Transformer: https://arxiv.org/pdf/2106.01345
+
+In context learning Decision Transformer: https://arxiv.org/pdf/2410.07071
