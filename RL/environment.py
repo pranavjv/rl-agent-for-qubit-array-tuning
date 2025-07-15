@@ -5,12 +5,12 @@ import yaml
 import os
 import torch
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
-
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
+import io
 
 class QuantumDeviceEnv(gym.Env):
     """
@@ -391,7 +391,7 @@ class QuantumDeviceEnv(gym.Env):
         """
         Helper method to get the current observation of the environment.
         
-        Returns a multi-modal observation with image and voltage data as torch tensors.
+        Returns a multi-modal observation with image and voltage data as numpy arrays.
         """
         # Get current voltage configuration
         current_voltages = self.device_state["current_voltages"]
@@ -406,10 +406,10 @@ class QuantumDeviceEnv(gym.Env):
         # Extract voltage centers for voltage observation
         voltage_centers = self._extract_voltage_centers(current_voltages)  # Shape: (2,)
         
-        # Create multi-modal observation dictionary with torch tensors
+        # Create multi-modal observation dictionary with numpy arrays 
         observation = {
-            'image': torch.tensor(image_obs, dtype=torch.float32),
-            'voltages': torch.tensor(voltage_centers, dtype=torch.float32)
+            'image': image_obs,  # numpy array
+            'voltages': voltage_centers  # numpy array
         }
         
         # Validate observation structure
@@ -559,13 +559,22 @@ class QuantumDeviceEnv(gym.Env):
             # Convert to RGB array for rgb_array mode
             fig.canvas.draw()
             
-            # Use the correct method for Agg backend
+            # Simple approach: save to bytes and load as image
             try:
-                # Use buffer_rgba() which is available on Agg backend
-                buf = fig.canvas.buffer_rgba()
-                data = np.asarray(buf)
-                # Convert RGBA to RGB by taking only the first 3 channels
-                data = data[:, :, :3]
+                # Save to bytes buffer
+                buf = io.BytesIO()
+                fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                buf.seek(0)
+                
+                # Load as image using PIL
+                from PIL import Image
+                img = Image.open(buf)
+                data = np.array(img)
+                
+                # Convert RGBA to RGB if needed
+                if data.shape[-1] == 4:
+                    data = data[:, :, :3]
+                    
             except Exception as e:
                 print(f"Error getting RGB data from canvas: {e}")
                 # Last resort: create a simple colored array
