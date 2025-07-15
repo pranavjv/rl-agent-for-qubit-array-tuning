@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import os
 from typing import Sequence
 
 def plot_rewards(rewards: Sequence[float], path: str) -> None:

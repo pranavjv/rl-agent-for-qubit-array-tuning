@@ -1,9 +1,7 @@
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-
-
 import os
 import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
 import yaml
 import argparse
 import torch.nn as nn
@@ -15,6 +13,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.utils import set_random_seed
+from sb3_policy import QuantumMultiModalFeaturesExtractor
 
 
 
@@ -37,8 +36,8 @@ def create_env(config_path: str, render_mode: Optional[str] = None):
 
 
 def train_sb3_agent(
-    env_config_path: str = "env_config.yaml",
-    ppo_config_path: str = "config/ppo_config.yaml",
+    env_config_path: str = "../env_config.yaml",
+    ppo_config_path: str = "ppo_config.yaml",
     total_timesteps: int = 10000,
     save_interval: int = 1000,
     eval_interval: int = 500,
@@ -79,7 +78,7 @@ def train_sb3_agent(
     env = create_env(env_config_path)
     
     # Create vectorized environment
-    env = DummyVecEnv([lambda: env])
+    env = DummyVecEnv([lambda: create_env(env_config_path)])
     
     # Create callbacks
     callbacks = []
@@ -93,9 +92,7 @@ def train_sb3_agent(
     callbacks.append(checkpoint_callback)
     
     # Evaluation callback
-    eval_env = create_env(env_config_path)
-    eval_env = Monitor(eval_env)
-    eval_env = DummyVecEnv([lambda: eval_env])
+    eval_env = DummyVecEnv([lambda: create_env(env_config_path)])
     
     eval_callback = EvalCallback(
         eval_env,
@@ -114,30 +111,30 @@ def train_sb3_agent(
     # Create PPO model with custom policy
     print("Creating PPO model with custom multi-modal policy...")
     model = PPO(
-        policy=QuantumMultiModalPolicy,
+        policy="MultiInputPolicy",
         env=env,
         verbose=verbose,
         tensorboard_log=tensorboard_log,
         
         # PPO parameters
-        learning_rate=ppo_params.get('actor_lr', 3e-4),
-        n_steps=ppo_params.get('timesteps_per_batch', 1024),
+        learning_rate=float(ppo_params.get('actor_lr', 3e-4)),
+        n_steps=int(ppo_params.get('timesteps_per_batch', 1024)),
         batch_size=64,  # SB3 default
-        n_epochs=ppo_params.get('updates_per_iteration', 5),
-        gamma=ppo_params.get('gamma', 0.99),
-        gae_lambda=ppo_params.get('gae_lambda', 0.95),
-        clip_range=ppo_params.get('epsilon', 0.2),
-        ent_coef=ppo_params.get('entropy_coef', 0.01),
-        max_grad_norm=optimization_params.get('max_grad_norm', 0.5),
+        n_epochs=int(ppo_params.get('updates_per_iteration', 5)),
+        gamma=float(ppo_params.get('gamma', 0.99)),
+        gae_lambda=float(ppo_params.get('gae_lambda', 0.95)),
+        clip_range=float(ppo_params.get('epsilon', 0.2)),
+        ent_coef=float(ppo_params.get('entropy_coef', 0.01)),
+        max_grad_norm=float(optimization_params.get('max_grad_norm', 0.5)),
         
         # Device settings
         device='auto',  # Let SB3 choose best device
         
         # Policy parameters
         policy_kwargs={
-            'features_extractor_class': None,  # We use custom policy
-            'features_extractor_kwargs': {},
-            'net_arch': [],  # Not used with custom policy
+            'features_extractor_class': QuantumMultiModalFeaturesExtractor,
+            'features_extractor_kwargs': {'features_dim': 128},
+            'net_arch': [],  # Not used with custom extractor
             'activation_fn': nn.ReLU,
         }
     )
@@ -175,13 +172,13 @@ def train_sb3_agent(
                 'ppo_config': ppo_config_path
             },
             'hyperparameters': {
-                'learning_rate': ppo_params.get('actor_lr', 3e-4),
-                'n_steps': ppo_params.get('timesteps_per_batch', 1024),
-                'n_epochs': ppo_params.get('updates_per_iteration', 5),
-                'gamma': ppo_params.get('gamma', 0.99),
-                'gae_lambda': ppo_params.get('gae_lambda', 0.95),
-                'clip_range': ppo_params.get('epsilon', 0.2),
-                'ent_coef': ppo_params.get('entropy_coef', 0.01),
+                'learning_rate': float(ppo_params.get('actor_lr', 3e-4)),
+                'n_steps': int(ppo_params.get('timesteps_per_batch', 1024)),
+                'n_epochs': int(ppo_params.get('updates_per_iteration', 5)),
+                'gamma': float(ppo_params.get('gamma', 0.99)),
+                'gae_lambda': float(ppo_params.get('gae_lambda', 0.95)),
+                'clip_range': float(ppo_params.get('epsilon', 0.2)),
+                'ent_coef': float(ppo_params.get('entropy_coef', 0.01)),
             }
         }
         
@@ -204,7 +201,7 @@ def train_sb3_agent(
 
 def evaluate_sb3_model(
     model_path: str,
-    env_config_path: str = "env_config.yaml",
+    env_config_path: str = "../env_config.yaml",
     num_episodes: int = 10,
     render: bool = False
 ):
@@ -244,7 +241,7 @@ def evaluate_sb3_model(
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             
-            episode_reward += reward
+            episode_reward += float(reward)
             episode_length += 1
             
             if terminated or truncated:
@@ -279,9 +276,9 @@ def main():
     parser = argparse.ArgumentParser(description="Train or evaluate SB3 agent on quantum device environment")
     parser.add_argument("--mode", choices=["train", "evaluate"], default="train",
                        help="Mode: train or evaluate")
-    parser.add_argument("--env-config", default="env_config.yaml",
+    parser.add_argument("--env-config", default="../env_config.yaml",
                        help="Path to environment configuration file")
-    parser.add_argument("--ppo-config", default="config/ppo_config.yaml",
+    parser.add_argument("--ppo-config", default="ppo_config.yaml",
                        help="Path to PPO configuration file")
     parser.add_argument("--model-path", default="./models/sb3_quantum_model",
                        help="Path to model (for evaluation) or save path (for training)")

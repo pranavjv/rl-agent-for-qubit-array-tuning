@@ -209,7 +209,7 @@ class QuantumDeviceEnv(gym.Env):
         z = self._get_charge_sensor_data(current_voltages)
         return z[:, :, 0]
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         """
         Resets the environment to an initial state and returns the initial observation.
 
@@ -217,12 +217,19 @@ class QuantumDeviceEnv(gym.Env):
         reset the state of the environment and return the first observation that
         the agent will see.
 
+        Args:
+            seed (int, optional): Random seed for reproducibility.
+            options (dict, optional): Additional options for reset.
+
         Returns:
             observation (np.ndarray): The initial observation of the space.
             info (dict): A dictionary with auxiliary diagnostic information.
         """
-        #seed the random number generator
-        super().reset(seed=self.seed)
+        # Handle seed if provided
+        if seed is not None:
+            super().reset(seed=seed)
+        else:
+            super().reset(seed=self.seed)
 
         # --- Reset the environment's state ---
         self.current_step = 0

@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from stable_baselines3.common.policies import BasePolicy
+from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.distributions import NormalDistribution
+from stable_baselines3.common.distributions import DiagGaussianDistribution
 from typing import Dict, Tuple, Type, Union
 
 
@@ -119,7 +119,7 @@ class QuantumMultiModalFeaturesExtractor(BaseFeaturesExtractor):
         return fused_features
 
 
-class QuantumMultiModalPolicy(BasePolicy):
+class QuantumMultiModalPolicy(ActorCriticPolicy):
     """
     Custom policy for quantum device environment with multi-modal observations.
     """
@@ -132,7 +132,7 @@ class QuantumMultiModalPolicy(BasePolicy):
             features_dim=128
         )
         
-        # Actor head (policy)
+        # Actor head (policy) - outputs action means
         self.actor_head = nn.Sequential(
             nn.Linear(128, 64),
             nn.ReLU(),
@@ -147,10 +147,6 @@ class QuantumMultiModalPolicy(BasePolicy):
             nn.Dropout(0.1),
             nn.Linear(64, 1)
         )
-        
-        # Action distribution parameters
-        self.action_net = nn.Linear(action_space.shape[0], action_space.shape[0])
-        self.value_net = nn.Linear(128, 1)
         
         # Learnable log standard deviation for continuous actions
         self.log_std = nn.Parameter(torch.zeros(action_space.shape[0]))
@@ -174,7 +170,7 @@ class QuantumMultiModalPolicy(BasePolicy):
         latent_vf = self.critic_head(features)
         
         # Create action distribution
-        mean_actions = self.action_net(latent_pi)
+        mean_actions = latent_pi
         std_actions = torch.exp(self.log_std)
         
         # Sample actions
@@ -187,13 +183,12 @@ class QuantumMultiModalPolicy(BasePolicy):
         log_probs = -0.5 * ((actions - mean_actions) / std_actions) ** 2 - torch.log(std_actions) - 0.5 * np.log(2 * np.pi)
         log_probs = log_probs.sum(dim=-1)
         
-        return actions, self.value_net(features), log_probs
+        return actions, latent_vf, log_probs
     
     def forward_actor(self, obs: torch.Tensor) -> torch.Tensor:
         """Forward pass for actor only."""
         features = self.features_extractor(obs)
-        latent_pi = self.actor_head(features)
-        return self.action_net(latent_pi)
+        return self.actor_head(features)
     
     def forward_critic(self, obs: torch.Tensor) -> torch.Tensor:
         """Forward pass for critic only."""
@@ -215,7 +210,7 @@ class QuantumMultiModalPolicy(BasePolicy):
         
         # Get action means and values
         latent_pi = self.actor_head(features)
-        mean_actions = self.action_net(latent_pi)
+        mean_actions = latent_pi
         std_actions = torch.exp(self.log_std)
         
         # Compute log probabilities
