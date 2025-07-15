@@ -635,4 +635,4 @@ if __name__ == "__main__":
     env.render() # This will save the plot after the action 
     env.close()
 
-    #TODO: this is charge sensor voltage, note this is being completely ignored for now,just kept as intialised
+    #charge sensor voltage, note this is being completely ignored for now,just kept as intialised

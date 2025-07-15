@@ -22,10 +22,10 @@ from video.plot_utils import plot_rewards
 
 def main():
     # Load environment with rgb_array render mode
-    env = QuantumDeviceEnv(config_path="env_config.yaml", render_mode="rgb_array")
+    env = QuantumDeviceEnv(config_path="../env_config.yaml", render_mode="rgb_array")
     
     # Load trained SB3 PPO agent
-    model_path = "agent/models/best/best_model.zip"
+    model_path = "../agent/models/best/best_model.zip"
     if not os.path.exists(model_path):
         print(f"Model not found at {model_path}")
         print("Available models:")
