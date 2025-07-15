@@ -44,9 +44,12 @@ class CNNEncoder(nn.Module):
         x = F.adaptive_avg_pool2d(x, (1, 1))
         x = x.view(x.size(0), -1)
         
+        # Initialize projection layer dynamically if not already initialized
+        if self.projection_layer is None:
+            self.projection_layer = nn.Linear(x.size(1), self.output_dim).to(x.device)
+        
         # Project to desired output dimension
-        if x.size(1) != self.output_dim:
-            x = nn.Linear(x.size(1), self.output_dim).to(x.device)(x)
+        x = self.projection_layer(x)
         
         return x
 
