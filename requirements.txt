@@ -8,14 +8,18 @@ matplotlib>=3.5.0
 tqdm>=4.64.0  # for progress bars
 psutil>=5.9.0  # for system monitoring
 
+# Stable Baselines 3 for RL
+stable-baselines3>=2.0.0
+tensorboard>=2.19.0  # Required by Stable Baselines 3
+
 # Video rendering and analysis dependencies
 imageio>=2.25.0  # for GIF creation
 seaborn>=0.11.0  # for enhanced plotting
 opencv-python>=4.5.0  # for frame overlays (optional)
+Pillow>=8.0.0  # for image processing
 
 # Quantum device simulation dependencies
 qarray>=0.1.0
 
 # Optional: for better performance
-# tensorboard>=2.10.0  # for training visualization
 # wandb>=0.13.0  # for experiment tracking 

@@ -4,6 +4,7 @@ Video saving utilities with robust error handling and multiple format support.
 
 import imageio
 import numpy as np
+import os
 from typing import Sequence
 
 def save_gif(frames: Sequence[np.ndarray], path: str, fps: int = 10) -> None:
