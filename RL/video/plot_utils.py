@@ -17,5 +17,6 @@ def plot_rewards(rewards: Sequence[float], path: str) -> None:
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     plt.savefig(path, dpi=150)
     plt.close() 
