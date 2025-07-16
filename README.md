@@ -14,3 +14,6 @@ In context learning Decision Transformer: https://arxiv.org/pdf/2410.07071
 ### Decision transformer / memory based RL for navigation
 * https://arxiv.org/pdf/2410.12820v1
 * https://arxiv.org/pdf/2405.14128v2
+
+### Navigation environments
+* https://arxiv.org/pdf/2405.14128v2 gym-nav2d
