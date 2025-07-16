@@ -16,4 +16,4 @@ In context learning Decision Transformer: https://arxiv.org/pdf/2410.07071
 * https://arxiv.org/pdf/2405.14128v2
 
 ### Navigation environments
-* https://arxiv.org/pdf/2405.14128v2 gym-nav2d
+* https://github.com/shufflebyte/gym-nav2d gym-nav2d
