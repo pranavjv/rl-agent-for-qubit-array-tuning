@@ -10,6 +10,7 @@ Decision Transformer: https://arxiv.org/pdf/2106.01345
 
 In context learning Decision Transformer: https://arxiv.org/pdf/2410.07071
 
+Some experimentation here: https://github.com/edwindn/snake_ppo
 
 ### Decision transformer / memory based RL for navigation
 * https://arxiv.org/pdf/2410.12820v1
