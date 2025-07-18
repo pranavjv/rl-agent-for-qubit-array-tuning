@@ -15,7 +15,9 @@ class NavEnv(gym.Env):
         self.max_distance = math.sqrt(self.max_size**2 + self.max_size**2)
         self.max_steps = 200 # encourage short episodes, 15 steps should be enough
         self.current_step = 0
+
         self.hit_rate = 0
+        self.total_episodes = 0
 
         self.target_tolerance = 10
         self.target_radius = self.target_tolerance / self.max_size
@@ -88,10 +90,13 @@ class NavEnv(gym.Env):
         if self._distance() < self.target_tolerance:
             reward = 100.0
             terminated = True
-            print(f"Reached target in {self.current_step} steps")
+            self.total_episodes += 1
+            self.hit_rate += 1
+            # print(f"Reached target in {self.current_step} steps")
         elif self.current_step >= self.max_steps:
             reward = -1.0
             truncated = True
+            self.total_episodes += 1
             # print(f"Episode truncated after {self.current_step} steps")
         else:
             reward = (1.0 - (self._distance() / self.max_distance)) * 0.1

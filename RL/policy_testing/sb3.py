@@ -128,6 +128,7 @@ def train_ppo(mode, save_path=None, load_path=None, train_timesteps=100_000):
 
         model.save(save_path)
 
+    print(f"Hit rate: {(train_env.hit_rate / train_env.total_episodes):.4f}")
     train_env.close()
     return model
 
@@ -140,6 +141,7 @@ if __name__ == "__main__":
     print('Training ...')
     #model = train_ppo(mode='train_resume', load_path='ppo_navigation.zip', save_path='ppo_navigation_v2')
     model = train_ppo(mode='train', save_path='ppo_navigation_train', train_timesteps=1_000_000)
+    #model = train_ppo(mode='infer', load_path='ppo_navigation_train')
 
     # eval
     save_runs = 2
