@@ -8,7 +8,7 @@ import math
 class NavEnv(gym.Env):
     def __init__(self):
         self.observation_space = spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
-        
+
         self.ndim = 2
         self.max_size = 250
         self.max_step_size = 10
@@ -86,7 +86,7 @@ class NavEnv(gym.Env):
         self.agent_y = np.clip(self.agent_y, 0, self.max_size)
 
         if self._distance() < self.target_tolerance:
-            reward = 1.0
+            reward = 100.0
             terminated = True
             print(f"Reached target in {self.current_step} steps")
         elif self.current_step >= self.max_steps:
@@ -94,7 +94,7 @@ class NavEnv(gym.Env):
             truncated = True
             # print(f"Episode truncated after {self.current_step} steps")
         else:
-            reward = (1.0 - (self._distance() / self.max_distance)) * 1.0
+            reward = (1.0 - (self._distance() / self.max_distance)) * 0.1
             # reward = -0.01
 
         obs = self._get_observation()

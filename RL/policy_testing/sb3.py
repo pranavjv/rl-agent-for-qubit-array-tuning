@@ -88,8 +88,8 @@ class PolicyNetwork(ActorCriticPolicy):
         )
 
 
-def train_ppo():
-    train_timesteps = 100_000
+def train_ppo(mode, save_path=None, load_path=None, train_timesteps=100_000):
+    assert mode in ['train', 'train_resume', 'infer'], "Mode must be one of 'train', 'train_resume', 'infer'."
 
     config = {
         'save_freq': train_timesteps // 5,  # 5 videos over total_timesteps
@@ -101,26 +101,33 @@ def train_ppo():
     # Create vectorized training env
     train_env = DummyVecEnv([lambda: NavEnv() for _ in range(4)])
 
-    model = PPO(
-        #policy=PolicyNetwork, # "MlpPolicy"
-        policy='MlpPolicy',
-        env=train_env,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        verbose=1
-    )
+    if mode == 'train':
+        model = PPO(
+            #policy=PolicyNetwork, # "MlpPolicy"
+            policy='MlpPolicy',
+            env=train_env,
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            verbose=1
+        )
+    elif mode == 'train_resume' or mode == 'infer':
+        model = PPO.load(load_path, env=train_env)
 
-    model.learn(
-        total_timesteps=config['total_timesteps'],
-        progress_bar=True
-    )
+    if mode == 'train' or mode == 'train_resume':
+        assert save_path is not None
 
-    model.save("ppo_navigation")
+        model.learn(
+            total_timesteps=config['total_timesteps'],
+            progress_bar=True
+        )
+
+        model.save(save_path)
+
     train_env.close()
     return model
 
@@ -131,10 +138,11 @@ if __name__ == "__main__":
     os.makedirs('./nav_videos/', exist_ok=True)
 
     print('Training ...')
-    model = train_ppo()
-    
+    #model = train_ppo(mode='train_resume', load_path='ppo_navigation.zip', save_path='ppo_navigation_v2')
+    model = train_ppo(mode='train', save_path='ppo_navigation_train', train_timesteps=1_000_000)
+
     # eval
-    save_runs = 4
+    save_runs = 2
     print(f'Saving {save_runs} eval runs ...')
     for i in range(save_runs):
         eval_env = NavEnv()
