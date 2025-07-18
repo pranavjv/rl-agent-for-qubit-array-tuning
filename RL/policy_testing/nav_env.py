@@ -8,8 +8,7 @@ import math
 class NavEnv(gym.Env):
     def __init__(self):
         self.observation_space = spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
-        self.action_space = spaces.Discrete(2)
-
+        
         self.ndim = 2
         self.max_size = 250
         self.max_step_size = 10
