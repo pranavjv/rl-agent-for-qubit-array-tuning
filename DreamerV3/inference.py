@@ -77,7 +77,7 @@ def load_agent(config, checkpoint_path):
     return agent
 
 
-def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50, 
+def run_inference(checkpoint_path, num_episodes, max_steps_per_episode, 
                  output_dir='inference_frames', config_path='dreamerv3/configs.yaml'):
     """Run inference and save frames."""
     
@@ -175,6 +175,10 @@ def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50,
     
     while episode_count < num_episodes:
         print(f"\n--- Episode {episode_count + 1}/{num_episodes} ---")
+        new_dir = f"{output_dir}/episode_{episode_count+1}"
+        os.makedirs(new_dir, exist_ok=True)
+        frame_data['output_dir'] = new_dir
+        frame_data['step'] = 0
         
         # Run until episode ends or max steps reached
         initial_step = step_count
