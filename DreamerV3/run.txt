@@ -3,6 +3,7 @@ python dreamerv3/main.py --task custom_qarray
 python dreamerv3/main.py --task custom_qarray --jax.platform cpu
 
 INFER: (replace with actual checkpoint)
-python inference.py --checkpoint /Users/e.d.888/logdir/20250721T153855/ckpt/20250721T153953F319194
+python inference.py --checkpoint /Users/e.d.888/logdir/20250721T133104/ckpt/20250721T140232F993755
+
 python dreamerv3/main.py --script eval_only --task custom_qarray --run.from_checkpoint /Users/e.d.888/logdir/20250721T153855/ckpt/20250721T153953F319194
 python dreamerv3/main.py --script eval_only --task custom_qarray --jax.platform cpu --run.from_checkpoint /Users/e.d.888/logdir/20250721T153855/ckpt/20250721T153953F319194
