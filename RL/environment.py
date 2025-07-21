@@ -30,6 +30,7 @@ class QuantumDeviceEnv(gym.Env):
         super().__init__()
 
         # --- Load Configuration ---
+        config_path = os.path.join(os.path.dirname(__file__), config_path)
         self.config = self._load_config(config_path)
 
         self.debug = self.config['training']['debug']
