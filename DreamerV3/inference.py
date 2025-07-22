@@ -104,7 +104,7 @@ def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50,
     print(f"Frames will be saved to: {output_dir}")
     
     # Storage for frame saving and episode tracking
-    frame_data = {'step': 0, 'output_dir': output_dir}
+    frame_data = {'step': 0, 'output_dir': output_dir, 'episode_step': 0}
     episode_data = {'count': 0, 'target': num_episodes, 'current_steps': 0, 'current_reward': 0.0}
     
     def save_frame_callback(tran, worker):
@@ -113,6 +113,7 @@ def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50,
             # Track episode progress
             episode_data['current_steps'] += 1
             episode_data['current_reward'] += tran.get('reward', 0.0)
+            frame_data['episode_step'] += 1
             
             # Debug: Print step information
             is_last = tran.get('is_last', False)
@@ -148,13 +149,18 @@ def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50,
                         break
                 
                 if quantum_env and hasattr(quantum_env, '_render_frame'):
-                    frame = quantum_env._render_frame()
+                    # Use the inference_plot=True parameter to get the correct visualization
+                    frame = quantum_env._render_frame(inference_plot=True)
                     if frame is not None:
                         import matplotlib.pyplot as plt
                         import matplotlib.image as mpimg
                         
-                        os.makedirs(frame_data['output_dir'], exist_ok=True)
-                        frame_path = os.path.join(frame_data['output_dir'], f'step_{frame_data["step"]:04d}.png')
+                        # Create episode-specific directory
+                        episode_dir = os.path.join(frame_data['output_dir'], f'episode_{episode_data["count"]+1}')
+                        os.makedirs(episode_dir, exist_ok=True)
+                        
+                        # Save frame with episode-specific numbering
+                        frame_path = os.path.join(episode_dir, f'step_{frame_data["episode_step"]:04d}.png')
                         
                         if frame.ndim == 3:  # RGB image
                             mpimg.imsave(frame_path, frame)
@@ -177,11 +183,13 @@ def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50,
                 print(f"  Total reward: {episode_data['current_reward']:.3f}")
                 print(f"  Final step reward: {tran.get('reward', 0.0):.3f}")
                 print(f"  is_last: {is_last}, is_terminal: {is_terminal}")
+                print(f"  Frames saved in: episode_{episode_data['count']}/")
                 print(f"=====================================\n")
                 
                 # Reset episode tracking for next episode
                 episode_data['current_steps'] = 0
                 episode_data['current_reward'] = 0.0
+                frame_data['episode_step'] = 0  # Reset episode step counter
     
     # Set up driver callbacks
     driver.on_step(save_frame_callback)
