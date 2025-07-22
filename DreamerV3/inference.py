@@ -77,7 +77,7 @@ def load_agent(config, checkpoint_path):
     return agent
 
 
-def run_inference(checkpoint_path, num_episodes, max_steps_per_episode, 
+def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50, 
                  output_dir='inference_frames', config_path='dreamerv3/configs.yaml'):
     """Run inference and save frames."""
     
@@ -103,15 +103,23 @@ def run_inference(checkpoint_path, num_episodes, max_steps_per_episode,
     print(f"Starting inference for {num_episodes} episodes...")
     print(f"Frames will be saved to: {output_dir}")
     
-    total_steps = 0
-    episodes_completed = 0
-    
-    # Storage for frame saving
+    # Storage for frame saving and episode tracking
     frame_data = {'step': 0, 'output_dir': output_dir}
+    episode_data = {'count': 0, 'target': num_episodes, 'current_steps': 0, 'current_reward': 0.0}
     
     def save_frame_callback(tran, worker):
         """Callback to save frames during episode"""
         if worker == 0:  # Only save from first worker
+            # Track episode progress
+            episode_data['current_steps'] += 1
+            episode_data['current_reward'] += tran.get('reward', 0.0)
+            
+            # Debug: Print step information
+            is_last = tran.get('is_last', False)
+            is_terminal = tran.get('is_terminal', False)
+            if episode_data['current_steps'] <= 5 or is_last:  # Print first few steps and last step
+                print(f"Step {episode_data['current_steps']}: reward={tran.get('reward', 0.0):.3f}, is_last={is_last}, is_terminal={is_terminal}")
+            
             # Save frame from current environment state
             env = driver.envs[0] if not driver.parallel else None
             if env:
@@ -140,7 +148,7 @@ def run_inference(checkpoint_path, num_episodes, max_steps_per_episode,
                         break
                 
                 if quantum_env and hasattr(quantum_env, '_render_frame'):
-                    frame = quantum_env._render_frame(inference_plot=True)
+                    frame = quantum_env._render_frame()
                     if frame is not None:
                         import matplotlib.pyplot as plt
                         import matplotlib.image as mpimg
@@ -153,12 +161,27 @@ def run_inference(checkpoint_path, num_episodes, max_steps_per_episode,
                         else:  # Grayscale or other format
                             plt.imsave(frame_path, frame, cmap='viridis')
                         
-                        print(f"Saved frame: {frame_path}")
+                        print(f"Saved frame: {frame_path} (Episode {episode_data['count']+1}, Step {episode_data['current_steps']}, Reward: {tran.get('reward', 0.0):.3f})")
                         frame_data['step'] += 1
                     else:
                         print(f"Warning: No frame available for step {frame_data['step']}")
                 else:
                     print(f"Warning: Could not find QuantumDeviceEnv with _render_frame method")
+            
+            # Check if episode terminated - this is when the episode naturally ends
+            if is_last:
+                episode_data['count'] += 1
+                termination_reason = "reached target" if is_terminal else "truncated (max steps)"
+                print(f"\n=== Episode {episode_data['count']} completed ({termination_reason}) ===")
+                print(f"  Steps: {episode_data['current_steps']}")
+                print(f"  Total reward: {episode_data['current_reward']:.3f}")
+                print(f"  Final step reward: {tran.get('reward', 0.0):.3f}")
+                print(f"  is_last: {is_last}, is_terminal: {is_terminal}")
+                print(f"=====================================\n")
+                
+                # Reset episode tracking for next episode
+                episode_data['current_steps'] = 0
+                episode_data['current_reward'] = 0.0
     
     # Set up driver callbacks
     driver.on_step(save_frame_callback)
@@ -169,29 +192,16 @@ def run_inference(checkpoint_path, num_episodes, max_steps_per_episode,
     # Reset driver
     driver.reset(agent.init_policy)
     
-    # Run episodes
-    episode_count = 0
-    step_count = 0
+    # Run episodes using the driver's episode-based approach
+    print(f"Running {num_episodes} episodes (will terminate naturally when agent reaches target)...")
     
-    while episode_count < num_episodes:
-        print(f"\n--- Episode {episode_count + 1}/{num_episodes} ---")
-        new_dir = f"{output_dir}/episode_{episode_count+1}"
-        os.makedirs(new_dir, exist_ok=True)
-        frame_data['output_dir'] = new_dir
-        frame_data['step'] = 0
-        
-        # Run until episode ends or max steps reached
-        initial_step = step_count
-        driver(policy, steps=max_steps_per_episode)
-        
-        episode_count += 1
-        steps_this_episode = step_count - initial_step
-        
-        print(f"Episode {episode_count} completed:")
-        print(f"  Steps taken: {steps_this_episode}")
+    # Use the driver's built-in episode counting - this respects is_last signals
+    driver(policy, episodes=num_episodes)
     
     driver.close()
-    print(f"\nInference completed! Total frames saved: {frame_data['step']}")
+    print(f"\nInference completed!")
+    print(f"Episodes completed: {episode_data['count']}")
+    print(f"Total frames saved: {frame_data['step']}")
     print(f"Frames are located in: {os.path.abspath(output_dir)}")
 
 
@@ -199,8 +209,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run DreamerV3 inference on QuantumDeviceEnv')
     parser.add_argument('--checkpoint', type=str, required=True,
                        help='Path to the checkpoint directory (e.g., /root/logdir/20250721T102619/ckpt/20250721T112751F343270)')
-    parser.add_argument('--episodes', type=int, default=1,
-                       help='Number of episodes to run (default: 1)')
+    parser.add_argument('--episodes', type=int, default=5,
+                       help='Number of episodes to run (default: 5)')
     parser.add_argument('--max-steps', type=int, default=50,
                        help='Maximum steps per episode (default: 50)')
     parser.add_argument('--output-dir', type=str, default='inference_frames',
