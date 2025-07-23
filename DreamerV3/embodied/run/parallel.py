@@ -375,13 +375,18 @@ def parallel_logger(make_logger, args):
           episode.add(key + '/sum', value, agg='sum')
       if tran['is_last']:
         result = episode.result()
+        episode_score = result.pop('score')
+        episode_length = result.pop('length') - 1
         logger.add({
-            'score': result.pop('score'),
-            'length': result.pop('length') - 1,
+            'score': episode_score,
+            'length': episode_length,
         }, prefix='episode')
         rew = result.pop('rewards')
         if len(rew) > 1:
           result['reward_rate'] = (np.abs(rew[1:] - rew[:-1]) >= 0.01).mean()
+        # Add score back to result for epstats aggregation
+        result['score'] = episode_score
+        result['length'] = episode_length
         epstats.add(result)
 
     for addr, last in list(updated.items()):
