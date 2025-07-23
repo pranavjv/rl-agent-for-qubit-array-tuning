@@ -1,5 +1,8 @@
 #Stock gitignore
 
+# Dreamer config
+DreamerV3/dreamerv3/configs.yaml
+
 # Python
 __pycache__/
 *.py[cod]
