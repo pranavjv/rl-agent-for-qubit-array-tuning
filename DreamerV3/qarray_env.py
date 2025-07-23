@@ -230,7 +230,6 @@ class QuantumDeviceEnv(gym.Env):
             super().reset(seed=seed)
         else:
             super().reset(seed=self.seed)
-            np.random.seed(12)
 
         # --- Reset the environment's state ---
         self.current_step = 0
@@ -238,23 +237,25 @@ class QuantumDeviceEnv(gym.Env):
         # Reset episode-specific normalization statistics
         self.episode_min = float('inf')
         self.episode_max = float('-inf')
-        
+
+
         # Initialize episode-specific voltage state
-        vg = self.model.gate_voltage_composer.do2d(
-            "vP1", self.config['simulator']['measurement']['v_min'], self.config['simulator']['measurement']['v_max'], self.config['simulator']['measurement']['resolution'],
-            "vP2", self.config['simulator']['measurement']['v_min'], self.config['simulator']['measurement']['v_max'], self.config['simulator']['measurement']['resolution']
+        #center of current window
+        center = self._random_center()
+
+        #current window
+        vg_current = self.model.gate_voltage_composer.do2d(
+            "vP1", center[0]+self.obs_voltage_min, center[0]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
+            "vP2", center[1]+self.obs_voltage_min, center[1]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
         )
-        
-        vg_ground_truth = vg + self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
 
-        # vg = vg_ground_truth.copy() for test copying I was initialising the ground truth voltages to the same as the current voltages
-
+        optimal_VG_center = self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center']) 
 
         # Device state variables (episode-specific)
         self.device_state = {
             "model": self.model,
-            "current_voltages": vg,
-            "ground_truth_voltages": vg_ground_truth,
+            "current_voltages": vg_current,
+            "ground_truth_center": optimal_VG_center,
         }
 
 
@@ -304,14 +305,13 @@ class QuantumDeviceEnv(gym.Env):
                 print("Max steps reached")
         
         # Check if the centers of the voltage sweeps are aligned (ignoring third dimension)
-        ground_truth_voltages = self.device_state["ground_truth_voltages"]
+        ground_truth_center = self.device_state["ground_truth_center"][:2]
 
-        ground_truth_center = self._extract_voltage_centers(ground_truth_voltages)  # Center of ground truth swee
         # Get current voltage settings (what the agent controls)
-        current_voltage_settings = self._extract_voltage_centers(self.device_state["current_voltages"])
- 
+        current_voltage_center = self._extract_voltage_centers(self.device_state["current_voltages"])
+
         # Compare only the first 2 dimensions (ignoring third dimension)
-        at_target = np.all(np.abs(ground_truth_center - current_voltage_settings) <= self.tolerance)
+        at_target = np.all(np.abs(ground_truth_center - current_voltage_center) <= self.tolerance)
         
         if at_target:
             terminated = True
@@ -323,6 +323,12 @@ class QuantumDeviceEnv(gym.Env):
         info = self._get_info() #diagnostic info
         
         return observation, reward, terminated, truncated, info
+    
+    def _random_center(self):
+        """
+        Randomly generate a center voltage for the voltage sweep.
+        """
+        return np.random.uniform(self.action_voltage_min-self.obs_voltage_min, self.action_voltage_max-self.obs_voltage_max, 2)
     
     def _get_reward(self):
         """
@@ -337,19 +343,16 @@ class QuantumDeviceEnv(gym.Env):
         The reward is also penalized by the number of steps taken to encourage efficiency.
         """
 
-        ground_truth_voltages = self.device_state["ground_truth_voltages"]
-        
-        # Calculate the center of the ground truth voltage sweep
-        ground_truth_center = self._extract_voltage_centers(ground_truth_voltages)  # Shape: (2,)
+        ground_truth_center = self.device_state["ground_truth_center"][:2]
         
         # Get current voltage settings (what the agent controls)
         # We need to get this from the action that was just applied
         # Since action is passed to step(), we need to store it or calculate it
-        current_voltage_settings = self._extract_voltage_centers(self.device_state["current_voltages"])
+        current_voltage_center = self._extract_voltage_centers(self.device_state["current_voltages"])
         
 
         # Calculate distance between target and current (2D)
-        distance = np.linalg.norm(ground_truth_center - current_voltage_settings)
+        distance = np.linalg.norm(ground_truth_center - current_voltage_center)
         
         # Calculate maximum possible distance in 2D voltage space
         max_possible_distance = np.sqrt(2) * (self.obs_voltage_max - self.obs_voltage_min)
@@ -358,13 +361,14 @@ class QuantumDeviceEnv(gym.Env):
         # This gives maximum reward when distance = 0 (perfect alignment)
         # and minimum reward (0) when distance = max_possible_distance (worst case)
         reward = max(max_possible_distance - distance, 0)
+
         
         # Penalize for taking too many steps (small penalty to encourage efficiency)
         reward -= self.current_step * 0.1
 
         # ADDED (should be more? what is the maximal reward we can achieve without terminating)
         # could have a length-based reward, eg. 1000*exp(-current_step)
-        at_target = np.all(np.abs(ground_truth_center - current_voltage_settings) <= self.tolerance)
+        at_target = np.all(np.abs(ground_truth_center - current_voltage_center) <= self.tolerance)
         if at_target:
             reward += 200.0
 
@@ -660,6 +664,12 @@ if __name__ == "__main__":
     frame = env._render_frame(inference_plot=True)
     path = "quantum_dot_plot.png"
     plt.imsave(path, frame, cmap='viridis')
+    sample_action = np.array([-1, -1])
+    env.step(sample_action)
+    frame = env._render_frame(inference_plot=True)
+    path = "quantum_dot_plot_2.png"
+    plt.imsave(path, frame, cmap='viridis')
     env.close()
+
 
     #charge sensor voltage, note this is being completely ignored for now,just kept as intialised
