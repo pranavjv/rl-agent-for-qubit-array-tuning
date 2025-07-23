@@ -229,7 +229,7 @@ class QuantumDeviceEnv(gym.Env):
         if seed is not None:
             super().reset(seed=seed)
         else:
-            super().reset(seed=self.seed)
+            super().reset(seed=None)
 
         # --- Reset the environment's state ---
         self.current_step = 0

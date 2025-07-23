@@ -61,8 +61,7 @@ class FromGym(embodied.Env):
   def step(self, action):
     if action['reset'] or self._done:
       self._done = False
-      obs = self._env.reset(seed=np.random.randint(0, 10000000000000000000000))
-      print(f"seed: {np.random.randint(0, 10000000000000000000000)}")
+      obs = self._env.reset()
       # Handle both old gym and new gymnasium return formats
       if isinstance(obs, tuple):
         obs = obs[0]  # gymnasium returns (obs, info)
