@@ -360,9 +360,9 @@ class QuantumDeviceEnv(gym.Env):
         # Reward = max_possible_distance - current_distance
         # This gives maximum reward when distance = 0 (perfect alignment)
         # and minimum reward (0) when distance = max_possible_distance (worst case)
-        reward = max(max_possible_distance - distance, 0)
+        reward = max(max_possible_distance - distance, 0)*0.01
 
-        
+
         # Penalize for taking too many steps (small penalty to encourage efficiency)
         reward -= self.current_step * 0.1
 
