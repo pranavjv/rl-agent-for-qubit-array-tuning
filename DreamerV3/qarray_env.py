@@ -656,12 +656,9 @@ class QuantumDeviceEnv(gym.Env):
 if __name__ == "__main__":
     env = QuantumDeviceEnv()
     env.reset()
-    env.render()  # This will save the initial state plot
-    #action = env.action_space.sample()
-    action = np.array([-1.1628181, -1.1628181])
-    print(action)
-    env.step(action)
-    env.render() # This will save the plot after the action 
+    frame = env._render_frame(inference_plot=True)
+    path = "quantum_dot_plot.png"
+    plt.imsave(path, frame, cmap='viridis')
     env.close()
 
     #charge sensor voltage, note this is being completely ignored for now,just kept as intialised
