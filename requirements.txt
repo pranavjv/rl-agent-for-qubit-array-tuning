@@ -25,3 +25,6 @@ qarray>=0.1.0
 # wandb>=0.13.0  # for experiment tracking 
 
 # Other: Dreamer requirements
+elements>=3.19.1
+portal>=3.5.0
+
