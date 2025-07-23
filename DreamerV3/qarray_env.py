@@ -230,6 +230,7 @@ class QuantumDeviceEnv(gym.Env):
             super().reset(seed=seed)
         else:
             super().reset(seed=self.seed)
+            np.random.seed(12)
 
         # --- Reset the environment's state ---
         self.current_step = 0
