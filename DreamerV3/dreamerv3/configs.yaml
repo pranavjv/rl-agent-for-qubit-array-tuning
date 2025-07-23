@@ -50,9 +50,9 @@ defaults:
     steps: 1e10
     duration: 0
     train_ratio: 32.0
-    log_every: 900
+    log_every: 600 # in seconds
     report_every: 300
-    save_every: 900 # in seconds
+    save_every: 600
     envs: 16
     eval_envs: 4
     eval_eps: 1
