@@ -7,9 +7,9 @@ defaults:
   task: custom_qarray  #CUSTOM
   seed: 0
   script: train
-  batch_size: 16
-  batch_length: 32 # modify based on memory limits
-  report_length: 32
+  batch_size: 8 # modify based on memory limits
+  batch_length: 8
+  report_length: 8
   consec_train: 1
   consec_report: 1
   replay_context: 1
