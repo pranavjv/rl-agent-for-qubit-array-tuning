@@ -128,7 +128,7 @@ def make_agent(config):
   from .agent import Agent
   env = make_env(config, 0)
   notlog = lambda k: not k.startswith('log/')
-  obs_space = {k: v for k, v in env.obs_space.items() if notlog(k)}
+  obs_space = {k: v for k, v in env.obs_space.items() if notlog(k) or k == 'voltages'} # ADD VOLTAGES
   act_space = {k: v for k, v in env.act_space.items() if k != 'reset'}
   env.close()
   if config.random_agent:

@@ -4,12 +4,12 @@ defaults:
   replica: 0
   replicas: 1
   method: name
-  task: custom_qarray  #CUSTOM
+  task: custom_qarray #CUSTOM
   seed: 0
   script: train
-  batch_size: 8 # modify based on memory limits
-  batch_length: 8
-  report_length: 8
+  batch_size: 16
+  batch_length: 32
+  report_length: 32
   consec_train: 1
   consec_report: 1
   replay_context: 1
@@ -73,8 +73,8 @@ defaults:
   jax:
     platform: cuda
     compute_dtype: bfloat16
-    policy_devices: [6]
-    train_devices: [6]
+    policy_devices: [0]
+    train_devices: [0]
     mock_devices: 0
     prealloc: True
     jit: True
