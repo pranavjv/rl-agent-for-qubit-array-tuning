@@ -87,7 +87,14 @@ def run_inference(checkpoint_path, num_episodes=5, max_steps_per_episode=50,
     # Override some config settings for inference
     config = config.update({
         'task': 'custom_qarray',
-        'jax': {'platform': 'cpu', 'debug': False, 'prealloc': False},
+        'jax': {
+            'platform': 'cpu', 
+            'debug': False, 
+            'prealloc': False,
+            'policy_devices': [0],  # Use first available device
+            'train_devices': [0],   # Use first available device
+            'compute_dtype': 'float32'  # Use float32 for CPU
+        },
         'logdir': '/tmp/inference_logdir',
     })
     
