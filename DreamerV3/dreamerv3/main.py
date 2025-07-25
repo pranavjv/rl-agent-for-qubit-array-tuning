@@ -128,7 +128,7 @@ def make_agent(config):
   from .agent import Agent
   env = make_env(config, 0)
   notlog = lambda k: not k.startswith('log/')
-  obs_space = {k: v for k, v in env.obs_space.items() if notlog(k)}
+  obs_space = {k: v for k, v in env.obs_space.items() if notlog(k) or k == 'voltages'} # ADD VOLTAGES
   act_space = {k: v for k, v in env.act_space.items() if k != 'reset'}
   env.close()
   if config.random_agent:
@@ -231,12 +231,6 @@ def make_env(config, index, **overrides):
       qarray_env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'qarray_env.py')
       sys.path.insert(0, os.path.dirname(qarray_env_path))
       from qarray_env import QuantumDeviceEnv
-    elif task == 'rndqarray':
-      # Import the QuantumDeviceEnv from qarray_env_rnd.py
-      # for testing with random inits
-      qarray_env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'qarray_env_rnd.py')
-      sys.path.insert(0, os.path.dirname(qarray_env_path))
-      from qarray_env_rnd import QuantumDeviceEnv
   
   ctor = {
       'dummy': 'embodied.envs.dummy:Dummy',
@@ -258,7 +252,7 @@ def make_env(config, index, **overrides):
       # Custom environment integration
       'custom': lambda task, **kw: (
           from_gym.FromGym(NavEnv(**kw)) if task == 'nav' 
-          else from_gym.FromGym(QuantumDeviceEnv(**kw)) if task in ['qarray', 'rndqarray']
+          else from_gym.FromGym(QuantumDeviceEnv(**kw)) if task == 'qarray'
           else None
       ),
   }[suite]
