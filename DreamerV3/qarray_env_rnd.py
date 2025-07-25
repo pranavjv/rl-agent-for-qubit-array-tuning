@@ -247,6 +247,9 @@ class QuantumDeviceEnv(gym.Env):
         if self.debug:
             print(f"Random scaler: {self.random_scaler}")
 
+        # Reset random capacitance matrices
+        self.model = self._load_model()
+
 
         # Initialize episode-specific voltage state
         #center of current window
@@ -412,13 +415,18 @@ class QuantumDeviceEnv(gym.Env):
         cgd_shape = np.array(Cgd).shape
         cgs_shape = np.array(Cgs).shape
 
-        capacitance_range = self.config['simulator']['model']['capacitance_range']
-        low = capacitance_range[0]
-        high = capacitance_range[1]
+        random_scaler_range = [0.8, 1.2]
+        Cds = np.array(Cds) * np.random.uniform(random_scaler_range[0], random_scaler_range[1], cds_shape)
+        Cgd = np.array(Cgd) * np.random.uniform(random_scaler_range[0], random_scaler_range[1], cgd_shape)
+        Cgs = np.array(Cgs) * np.random.uniform(random_scaler_range[0], random_scaler_range[1], cgs_shape)
+
+        # capacitance_range = self.config['simulator']['model']['capacitance_range']
+        # low = capacitance_range[0]
+        # high = capacitance_range[1]
         # Cdd = np.random.uniform(low, high, cdd_shape)
-        Cds = np.random.uniform(low, high, cds_shape)
-        Cgd = np.random.uniform(low, high, cgd_shape)
-        Cgs = np.random.uniform(low, high, cgs_shape)
+        # Cds = np.random.uniform(low, high, cds_shape)
+        # Cgd = np.random.uniform(low, high, cgd_shape)
+        # Cgs = np.random.uniform(low, high, cgs_shape)
 
         if self.debug:
             print(f"Cdd matrix: {Cdd}")
@@ -440,7 +448,7 @@ class QuantumDeviceEnv(gym.Env):
             max_charge_carriers=self.config['simulator']['model']['max_charge_carriers'],
         )
 
-        print('Loaded model with random capacitance matrices')
+        # print('Loaded model with random capacitance matrices')
         
         model.gate_voltage_composer.virtual_gate_matrix = self.config['simulator']['virtual_gate_matrix']
 
