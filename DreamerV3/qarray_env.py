@@ -664,12 +664,9 @@ if __name__ == "__main__":
     frame = env._render_frame(inference_plot=True)
     path = "quantum_dot_plot.png"
     plt.imsave(path, frame, cmap='viridis')
-    sample_action = np.array([-1, -1])
-    env.step(sample_action)
-    frame = env._render_frame(inference_plot=True)
-    path = "quantum_dot_plot_2.png"
-    plt.imsave(path, frame, cmap='viridis')
-    env.close()
-
-
-    #charge sensor voltage, note this is being completely ignored for now,just kept as intialised
+    # sample_action = np.array([-1, -1])
+    # env.step(sample_action)
+    # frame = env._render_frame(inference_plot=True)
+    # path = "quantum_dot_plot_2.png"
+    # plt.imsave(path, frame, cmap='viridis')
+    # env.close()
