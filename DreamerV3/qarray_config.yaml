@@ -75,7 +75,7 @@ env:
   reward:
   
   #tolerance for termination criteria
-  tolerance: 0.2
+  tolerance: 0.5
 
 
 training:

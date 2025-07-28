@@ -233,6 +233,9 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         self.current_step = 0
+
+        #initialize the voltage scaler
+        self.scaler = np.random.uniform(0.33, 3.33)
         
         # Reset episode-specific normalization statistics
         self.episode_min = float('inf')
@@ -288,8 +291,12 @@ class QuantumDeviceEnv(gym.Env):
             info (dict): A dictionary with auxiliary diagnostic information.
         """
 
+        #scale the action
+        action = action * self.scaler
+
+
         # --- Update the environment's state based on the action ---
-        self.current_step += 1
+        self.current_step += 1definitely
         # action is now a numpy array of shape (num_voltages,) containing voltage values
 
         self._apply_voltages(action) #this step will update the voltages stored in self.device_state
