@@ -11,10 +11,10 @@ simulator:
       - [0.75, 0.1, 0.02]
       - [0.1, 0.75, 0.02]
     
-    # Dot-to-source capacitance matrix
+    # Dot-to-sensor capacitance matrix
     Cds: [[0.08, 0.08]]
     
-    # Gate-to-source capacitance matrix
+    # Gate-to-sensor capacitance matrix
     Cgs: [[0.03, 0.03, 1]]
     
     # White noise amplitude for charge stability diagram
