@@ -1,14 +1,14 @@
-from simulator import *
-from tunneling_simulator import *
-from util_functions import compensated_simulator
-from noise_processes import OU_process
+from .simulator import *
+from .tunneling_simulator import *
+from .util_functions import compensated_simulator
+from .noise_processes import OU_process
 
 #for the algorithm
 import numpy as np
 
 #for plotting
 from matplotlib import pyplot as plt
-from plotting import get_CSD_data, get_polytopes
+from .plotting import get_CSD_data, get_polytopes
 
 #for measuring runtime
 import time
@@ -310,12 +310,12 @@ class Experiment(): #TODO: change name to the simulator name
         '''
 
         if v_offset is None:
-            v_offset = np.zeros(self.N, dtype=float)
+            v_offset = np.zeros(self.N)
         else:
             v_offset = np.array(v_offset,dtype=float)
 
-        xout = x_voltages + np.dot(v_offset,plane_axes[0])
-        yout = y_voltages + np.dot(v_offset,plane_axes[1])
+        xout = x_voltages + v_offset[plane_axes[0]]
+        yout = y_voltages + v_offset[plane_axes[1]]
 
 
         minV = np.array([x_voltages[0], y_voltages[0]])
@@ -356,6 +356,8 @@ class Experiment(): #TODO: change name to the simulator name
         v_offset: Nx1 array, the offset voltage of all of the gates
         '''
         sensor_values = None
+        CSD_data = None
+        polytopes = None
 
         # check required parameters
         if target_state is None:
@@ -364,7 +366,7 @@ class Experiment(): #TODO: change name to the simulator name
         
         plane_axes = np.array(plane_axes)
         # prepare plot
-        v_offset, minV, maxV, resolution, xout, yout = self.get_plot_args(x_voltages, y_voltages, plane_axes, V_offset) 
+        v_offset, minV, maxV, resolution, xout, yout = self.get_plot_args(x_voltages, y_voltages, plane_axes, v_offset) 
         
         # prepare the simulator
         csimulator = self.capacitance_sim
@@ -380,28 +382,37 @@ class Experiment(): #TODO: change name to the simulator name
 
         elif use_virtual_gates:
             csimulator = self.get_virtualised_csim(csimulator, target_state)
-       
         
-        # Part for the electrostatic CSD:
-        if not use_sensor_signal or compute_polytopes:
-            backend, CSD_data, states =  get_CSD_data(csimulator, v_offset, np.array(plane_axes).T, minV, maxV, resolution, target_state)
-            if compute_polytopes:
-                v_offset_polytopes = [np.dot(v_offset,plane_axes[0]), np.dot(v_offset,plane_axes[1])]
-                polytopes = get_polytopes(states, backend, minV, maxV,  v_offset_polytopes)
+        # Construct proper sweep matrix P from plane_axes
+        P = np.zeros((self.N, 2))
+        P[plane_axes[0], 0] = 1  # x-axis direction
+        P[plane_axes[1], 1] = 1  # y-axis direction
+        
+        if use_sensor_signal:
+            sensor_values = self.tunneling_sim.sensor_scan_2D(v_offset, P, minV, maxV, resolution, target_state)
+            # When using sensor signal, return sensor values as the main data
+            return xout, yout, sensor_values, polytopes, sensor_values, v_offset
+        else:
+            # Part for the electrostatic CSD:
+            if not use_sensor_signal or compute_polytopes:
+                backend, CSD_data, states =  get_CSD_data(csimulator, v_offset, P, minV, maxV, resolution, target_state)
+                if compute_polytopes:
+                    v_offset_polytopes = [np.dot(v_offset,plane_axes[0]), np.dot(v_offset,plane_axes[1])]
+                    polytopes = get_polytopes(states, backend, minV, maxV,  v_offset_polytopes)
+                
+                if not use_sensor_signal:
+                    return xout,yout, CSD_data.T, polytopes, sensor_values, v_offset
             
-            if not use_sensor_signal:
-                return xout,yout, CSD_data.T, polytopes, sensor_values, v_offset
-        
-        # Part for the sensor signal:
-        self.print_logs = False
-        simulator = self.deploy_tunneling_sim(csimulator, self.tunneling_config)
-        sensor_values = simulator.sensor_scan_2D(v_offset, plane_axes.T, minV, maxV, resolution, target_state)
+            # Part for the sensor signal:
+            self.print_logs = False
+            simulator = self.deploy_tunneling_sim(csimulator, self.tunneling_config)
+            sensor_values = simulator.sensor_scan_2D(v_offset, P, minV, maxV, resolution, target_state)
 
-        if compute_polytopes:
-            backend, CSD_data, states =  get_CSD_data(csimulator, v_offset, np.array(plane_axes).T, minV, maxV, resolution,
-                                                       target_state)
-            V_offset_polytopes = [np.dot(v_offset,plane_axes[0]), np.dot(v_offset,plane_axes[1])]
-            polytopes = get_polytopes(states, backend, minV, maxV,   V_offset_polytopes)
+            if compute_polytopes:
+                backend, CSD_data, states =  get_CSD_data(csimulator, v_offset, P, minV, maxV, resolution,
+                                                           target_state)
+                V_offset_polytopes = [np.dot(v_offset,plane_axes[0]), np.dot(v_offset,plane_axes[1])]
+                polytopes = get_polytopes(states, backend, minV, maxV,   V_offset_polytopes)
         return xout, yout, CSD_data.T, polytopes, sensor_values, v_offset
         
         

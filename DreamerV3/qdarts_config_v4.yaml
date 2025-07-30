@@ -1,0 +1,151 @@
+# QDarts v4 Configuration for Quantum Device Simulation with Barrier Support
+# This file contains all parameters for the QDarts v4 simulator
+
+device:
+  # Device topology
+  topology:
+    num_dots: 3
+    num_gates: 6
+    inner_dots: [0, 1]
+    sensor_dots: [2]
+    plunger_gates: [0, 1]  # Dot plunger gates
+    barrier_gates: [2, 3, 4]  # Barrier gates
+    sensor_gates: [5]  # Sensor gate
+
+  # Target state configuration
+  target_state: [1, 1, 5]
+
+simulator:
+  capacitance:
+    # Dot-to-dot capacitance matrix (N_dots x N_dots) 
+    C_DD:
+      - [1.0, 0.2, 0.08]
+      - [0.2, 1.0, 0.08]
+      - [0.08, 0.08, 1.0]
+    
+    # Dot-to-gate capacitance matrix (N_dots x N_gates) - ALL gates including barriers
+    # Format: [dot_0_to_gates], [dot_1_to_gates], [dot_2_to_gates]
+    C_DG:
+      - [0.75, 0.1, 0, 0, 0, 0.02]  # Dot 0 to gates 0,1,2,3,4,5
+      - [0.1, 0.75, 0, 0, 0, 0.02]  # Dot 1 to gates 0,1,2,3,4,5  
+      - [0, 0, 0, 0, 0, 1.0]        # Dot 2 (sensor) to gates 0,1,2,3,4,5
+    
+    # Minimum voltage bounds for each gate
+    bounds_limits:
+      - [-2.0, 2.0]  # Gate 0 (dot 0 plunger)
+      - [-2.0, 2.0]  # Gate 1 (dot 1 plunger)
+      - [-2.0, 2.0]  # Gate 2 (barrier 2)
+      - [-2.0, 2.0]  # Gate 3 (barrier 3)
+      - [-2.0, 2.0]  # Gate 4 (barrier 4)
+      - [-2.0, 2.0]  # Gate 5 (sensor)
+    
+    ks: 4
+
+  tunneling:
+    # Base tunnel couplings matrix (N_dots x N_dots)
+    # This will be dynamically modified by barrier voltages
+    tunnel_couplings:
+      - [0, 30e-6, 30e-6]  # Dot 0 couplings
+      - [30e-6, 0, 30e-6]  # Dot 1 couplings
+      - [30e-6, 30e-6, 0]  # Dot 2 (sensor) couplings
+    
+    temperature: 0.1  # K
+    energy_range_factor: 1.0
+
+  # Barrier control configuration
+  barrier:
+    # Barrier gate indices (matching topology.barrier_gates)
+    barrier_gates: [2, 3, 4]
+    
+    # Barrier to tunnel coupling mappings
+    # Each barrier controls specific tunnel couplings
+    barrier_mappings:
+      # Barrier 2: controls coupling between reservoir and dot 0
+      barrier_2:
+        coupling_type: "reservoir_to_dot"
+        target_dot: 0
+        base_coupling: 30e-6
+        voltage_scale: 1.0  # How much barrier voltage affects coupling
+        voltage_offset: 0.0  # Voltage offset for barrier control
+        
+      # Barrier 3: controls coupling between dots 0 and 1
+      barrier_3:
+        coupling_type: "dot_to_dot"
+        target_dots: [0, 1]
+        base_coupling: 30e-6
+        voltage_scale: 1.0
+        voltage_offset: 0.0
+        
+      # Barrier 4: controls coupling between dot 1 and reservoir
+      barrier_4:
+        coupling_type: "dot_to_reservoir"
+        target_dot: 1
+        base_coupling: 30e-6
+        voltage_scale: 1.0
+        voltage_offset: 0.0
+    
+    # Default barrier voltages
+    default_barrier_voltages:
+      barrier_2: 0.0
+      barrier_3: 0.0
+      barrier_4: 0.0
+
+  sensor:
+    sensor_dot_indices: [2]
+    sensor_detunings: [0.0]  # meV
+    noise_amplitude:
+      fast_noise: 1e-6
+      slow_noise: 1e-8
+    peak_width_multiplier: 200
+
+# Measurement configuration
+measurement:
+  # Sweep configuration for CSD generation
+  sweep:
+    x_axis:
+      gate: 0  # Dot 0 plunger gate
+      voltage_range: [-0.2, 0.2]
+      resolution: 100
+    y_axis:
+      gate: 1  # Dot 1 plunger gate
+      voltage_range: [-0.2, 0.2]
+      resolution: 100
+  
+  # Barrier sweep configuration
+  barrier_sweep:
+    enabled: false
+    barrier_gate: 3  # Which barrier to sweep
+    voltage_range: [-1.0, 1.0]
+    resolution: 50
+    fixed_barrier_voltages:
+      barrier_2: 0.0
+      barrier_4: 0.0
+
+# Advanced features
+features:
+  use_virtual_gates: false
+  compensate_sensors: false
+  center_transition: false
+  target_transition: [1, -1]  # [dot_0_change, dot_1_change]
+  compute_polytopes: false
+  use_sensor_signal: false
+
+# Output configuration
+output:
+  # Plotting configuration
+  plots:
+    save_format: "png"
+    dpi: 300
+    bbox_inches: "tight"
+  
+  # File naming
+  filenames:
+    csd_plot: "qdarts_v4_csd_plot.png"
+    sensor_plot: "qdarts_v4_sensor_plot.png"
+    noised_plot: "qdarts_v4_noised_plot.png"
+
+# Logging configuration
+logging:
+  print_logs: true
+  timing: true
+  debug: false 

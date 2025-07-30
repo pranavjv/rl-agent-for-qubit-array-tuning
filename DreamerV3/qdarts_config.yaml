@@ -54,7 +54,7 @@ simulator:
     
     # Peak configuration
     g_max: 1.0
-    peak_width_multiplier: 200
+    peak_width_multiplier: 150
     
     # Noise configuration
     noise:
