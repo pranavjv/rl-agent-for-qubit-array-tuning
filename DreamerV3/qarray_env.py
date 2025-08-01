@@ -296,7 +296,7 @@ class QuantumDeviceEnv(gym.Env):
 
 
         # --- Update the environment's state based on the action ---
-        self.current_step += 1definitely
+        self.current_step += 1
         # action is now a numpy array of shape (num_voltages,) containing voltage values
 
         self._apply_voltages(action) #this step will update the voltages stored in self.device_state
