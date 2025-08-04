@@ -4,6 +4,7 @@ from numpy.distutils.misc_util import is_sequence
 from qdarts.util_functions import is_invertible_matrix, find_label, find_point_on_transitions, compute_polytope_slacks, compute_maximum_inscribed_circle, fix_gates, axis_align_transitions
 from qdarts.polytope import Polytope
 from qdarts.model import Model
+from qdarts.model_with_barriers import ModelWithBarriers
 import time
 
 class BaseCapacitiveDeviceSimulator:
