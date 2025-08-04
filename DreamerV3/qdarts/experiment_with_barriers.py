@@ -515,6 +515,10 @@ class Experiment(): #TODO: change name to the simulator name
             #if not target state use [0,0,0] for number of dots
             target_state = [0]*self.num_dots
         
+        # Calculate a point inside the target state's polytope EARLY
+        # This is crucial for sensor_scan_2D to work properly
+        m = self.capacitance_sim.boundaries(target_state).point_inside
+        
         plane_axes = np.array(plane_axes)
         # prepare plot
         v_offset, minV, maxV, resolution, xout, yout = self.get_plot_args(x_voltages, y_voltages, plane_axes, v_offset) 
@@ -541,7 +545,8 @@ class Experiment(): #TODO: change name to the simulator name
         P[plane_axes[1], 1] = 1  # y-axis direction
         
         if use_sensor_signal:
-            sensor_values = self.tunneling_sim.sensor_scan_2D(v_offset, P, minV, maxV, resolution, target_state)
+            # Use 'm' (point inside target state) instead of 'v_offset' for sensor scan
+            sensor_values = self.tunneling_sim.sensor_scan_2D(m, P, minV, maxV, resolution, target_state)
             # When using sensor signal, return sensor values as the main data
             return xout, yout, sensor_values, polytopes, sensor_values, v_offset
         else:
@@ -558,7 +563,8 @@ class Experiment(): #TODO: change name to the simulator name
             # Part for the sensor signal:
             self.print_logs = False
             simulator = self.deploy_tunneling_sim(csimulator, self.tunneling_config)
-            sensor_values = simulator.sensor_scan_2D(v_offset, P, minV, maxV, resolution, target_state)
+            # Use 'm' (point inside target state) instead of 'v_offset' for sensor scan
+            sensor_values = simulator.sensor_scan_2D(m, P, minV, maxV, resolution, target_state)
 
             if compute_polytopes:
                 backend, CSD_data, states =  get_CSD_data(csimulator, v_offset, P, minV, maxV, resolution,
