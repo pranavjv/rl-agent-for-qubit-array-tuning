@@ -36,12 +36,12 @@ simulator:
     # Base tunnel couplings matrix (N_dots x N_dots)
     # This will be dynamically modified by barrier voltages
     tunnel_couplings:
-      - [0, 30e-6, 30e-6]  # Dot 0 couplings
-      - [30e-6, 0, 30e-6]  # Dot 1 couplings
-      - [30e-6, 30e-6, 0]  # Dot 2 (sensor) couplings
+      - [0    , 30e-4, 0]  # Dot 0 couplings
+      - [30e-4, 0    , 0]  # Dot 1 couplings
+      - [0    , 0    , 0]  # Dot 2 (sensor) couplings
     
-    temperature: 0.1  # K
-    energy_range_factor: 1.0
+    temperature: 1  # K
+    energy_range_factor: 5.0
 
   # Barrier control configuration
   barrier:
@@ -52,7 +52,7 @@ simulator:
       barrier_2:
         coupling_type: "reservoir_to_dot"
         target_dot: 0
-        base_coupling: 30e-6
+        base_coupling: 30e-4
         alpha: 2.0  # Stronger voltage dependence for reservoir coupling
         voltage_offset: 0.0
         
@@ -60,7 +60,7 @@ simulator:
       barrier_3:
         coupling_type: "dot_to_dot"
         target_dots: [0, 1]
-        base_coupling: 30e-6
+        base_coupling: 30e-4
         alpha: 1.5  # Moderate voltage dependence for dot-dot coupling
         voltage_offset: 0.0
         
@@ -68,7 +68,7 @@ simulator:
       barrier_4:
         coupling_type: "dot_to_reservoir"
         target_dot: 1
-        base_coupling: 30e-6
+        base_coupling: 30e-4
         alpha: 2.0  # Same as barrier_2 (both reservoir couplings)
         voltage_offset: 0.0
     
@@ -80,10 +80,11 @@ simulator:
 
   sensor:
     sensor_dot_indices: [2]
-    sensor_detunings: [0.0]  # meV
+    sensor_gate_indices: [5]
+    sensor_detunings: [0.0005]  # meV
     noise_amplitude:
-      fast_noise: 1e-6
-      slow_noise: 1e-8
+      fast_noise: 1e-4
+      slow_noise: 1e-5
     peak_width_multiplier: 200
 
 # Measurement configuration
@@ -91,7 +92,7 @@ measurement:
   # Voltage sweep configuration
   voltage_range:
     min: [-0.2, -0.2]
-    max: [0.4, 0.4]
+    max: [0.2, 0.2]
   
   # Resolution for 2D scans
   resolution: 250

@@ -436,11 +436,21 @@ class Experiment(): #TODO: change name to the simulator name
             
             # TODO: Do we need to specify compensation gates *and* sensor ids? Only if we want to compensate a subset of sensors.
         else:
+
+            
+            # Get sensor dot indices (these correspond to plunger gate indices)
+            sensor_dot_indices = self.sensor_config["sensor_dot_indices"]
+            
+            # Filter to only include plunger gates (gates with indices < num_dots)
+            sensor_gate_indices = self.sensor_config["sensor_gate_indices"]
+            
+            
+            # Use only plunger gates for compensation
             csimulator = compensated_simulator(csimulator,
                                         target_state=target_state,
-                                        compensation_gates=self.sensor_config["sensor_dot_indices"],
-                                        sensor_ids = self.sensor_config["sensor_dot_indices"], 
-                                        sensor_detunings = self.sensor_config["sensor_detunings"])
+                                        compensation_gates=sensor_gate_indices,
+                                        sensor_ids=sensor_dot_indices, 
+                                        sensor_detunings=self.sensor_config["sensor_detunings"])
         return csimulator
     
     def get_plot_args(self, x_voltages, y_voltages, plane_axes, v_offset = None):

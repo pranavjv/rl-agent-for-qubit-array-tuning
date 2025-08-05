@@ -64,12 +64,13 @@ def main():
     print("\nGenerating CSD with initial barrier voltages...")
     start_time = time.time()
     
-    xout, yout, CSD_data, polytopes, sensor_values, v_offset = experiment.generate_CSD(
+    xout, yout, _, polytopes, sensor_values, v_offset = experiment.generate_CSD(
         x_voltages=x_voltages,
         y_voltages=y_voltages,
         plane_axes=plane_axes,
         target_state=config['device']['target_state'],
         use_sensor_signal=True,  # Get sensor response
+        compensate_sensors=True,
         compute_polytopes=False
     )
     
@@ -91,12 +92,13 @@ def main():
     print("Generating CSD with updated barrier voltages...")
     start_time = time.time()
     
-    xout2, yout2, CSD_data2, polytopes2, sensor_values2, v_offset2 = experiment.generate_CSD(
+    xout2, yout2, _, polytopes2, sensor_values2, v_offset2 = experiment.generate_CSD(
         x_voltages=x_voltages,
         y_voltages=y_voltages,
         plane_axes=plane_axes,
         target_state=config['device']['target_state'],
         use_sensor_signal=True,
+        compensate_sensors=True,
         compute_polytopes=False
     )
     
