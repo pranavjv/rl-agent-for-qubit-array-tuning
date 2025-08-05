@@ -13,23 +13,17 @@ from qdarts.experiment_with_barriers import Experiment
 
 def main():
     """
-    Minimal script demonstrating QDarts v5 with barrier voltage control.
     """
-    print("QDarts v5 - Barrier Voltage Control Demo")
-    print("=" * 50)
     
-    # Load configuration
     print("Loading configuration...")
     config = load_qdarts_config('qdarts_config_v5.yaml')
     print_config_summary(config)
     
-    # Extract configurations for Experiment
     capacitance_config = config['simulator']['capacitance']
     tunneling_config = config['simulator']['tunneling']
     sensor_config = config['simulator']['sensor']
     barrier_config = config['simulator']['barrier']
     
-    # Initialize experiment with barrier support
     print("\nInitializing experiment with barriers...")
     experiment = Experiment(
         capacitance_config=capacitance_config,
@@ -39,12 +33,10 @@ def main():
         print_logs=True
     )
     
-    # Set initial barrier voltages (using defaults from config)
     print("\nSetting initial barrier voltages...")
     initial_barrier_voltages = barrier_config['default_barrier_voltages']
     experiment.update_tunnel_couplings(initial_barrier_voltages)
     
-    # Get measurement parameters
     measurement = config['measurement']
     x_voltages = np.linspace(
         measurement['voltage_range']['min'][0], 
@@ -120,7 +112,7 @@ def main():
     plt.pcolormesh(xout, yout, sensor_values[:, :, 0].T)
     plt.xlabel('Gate 0 Voltage (V)')
     plt.ylabel('Gate 1 Voltage (V)')
-    plt.title(f'Sensor Response\nInitial Barriers: {initial_barrier_voltages}')
+    plt.title(f'Sensor Response\nInitial Barriers:')
     plt.colorbar(label='Sensor Conductance')
     
     # Plot 2: Updated barrier voltages
@@ -128,7 +120,7 @@ def main():
     plt.pcolormesh(xout2, yout2, sensor_values2[:, :, 0].T)
     plt.xlabel('Gate 0 Voltage (V)')
     plt.ylabel('Gate 1 Voltage (V)')
-    plt.title(f'Sensor Response\nUpdated Barriers: {new_barrier_voltages}')
+    plt.title(f'Sensor Response\nUpdated Barriers:')
     plt.colorbar(label='Sensor Conductance')
     
     # Plot 3: Difference
@@ -152,28 +144,8 @@ def main():
     print(f"  Updated sensor range: [{sensor_values2[:, :, 0].min():.4f}, {sensor_values2[:, :, 0].max():.4f}]")
     print(f"  Maximum difference: {np.abs(difference).max():.4f}")
     
-    # Demonstrate barrier voltage effect analysis
-    print("\nAnalyzing barrier voltage effects...")
-    barrier_effect = experiment.get_barrier_voltage_effect(
-        'barrier_3', 
-        voltage_range=[-1.0, 1.0], 
-        resolution=100
-    )
     
-    plt.figure(figsize=(10, 6))
-    plt.plot(barrier_effect['voltages'], barrier_effect['couplings'])
-    plt.xlabel('Barrier 3 Voltage (V)')
-    plt.ylabel('Tunnel Coupling (eV)')
-    plt.title(f'Barrier 3 Effect on Dot-Dot Coupling\nα = {barrier_effect["alpha"]}')
-    plt.grid(True)
-    plt.savefig('qdarts_v5_barrier_effect.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"  Barrier 3 coupling range: [{barrier_effect['couplings'].min():.2e}, {barrier_effect['couplings'].max():.2e}] eV")
-    
-    print("\nDemo completed! Check the generated plots:")
     print("  - qdarts_v5_barrier_comparison.png")
-    print("  - qdarts_v5_barrier_effect.png")
 
 
 if __name__ == "__main__":
