@@ -105,49 +105,39 @@ def main():
     print(f"CSD generation completed in {time.time() - start_time:.2f} seconds")
     
     # Create comparison plots
-    print("\nCreating comparison plots...")
+    print("\nCreating comparison plot...")
+    
+    # Create figure with 2 panels side by side
+    plt.figure(figsize=(12, 5))
     
     # Plot 1: Initial barrier voltages
-    plt.figure(figsize=(15, 5))
-    
-    plt.subplot(1, 3, 1)
+    plt.subplot(1, 2, 1)
     plt.pcolormesh(xout, yout, sensor_values[:, :, 0].T)
     plt.xlabel('Gate 0 Voltage (V)')
     plt.ylabel('Gate 1 Voltage (V)')
-    plt.title(f'Sensor Response\nInitial Barriers:')
+    plt.title('Sensor Response\nInitial Barriers')
     plt.colorbar(label='Sensor Conductance')
     
     # Plot 2: Updated barrier voltages
-    plt.subplot(1, 3, 2)
+    plt.subplot(1, 2, 2)
     plt.pcolormesh(xout2, yout2, sensor_values2[:, :, 0].T)
     plt.xlabel('Gate 0 Voltage (V)')
     plt.ylabel('Gate 1 Voltage (V)')
-    plt.title(f'Sensor Response\nUpdated Barriers:')
+    plt.title('Sensor Response\nUpdated Barriers')
     plt.colorbar(label='Sensor Conductance')
-    
-    # Plot 3: Difference
-    plt.subplot(1, 3, 3)
-    difference = sensor_values2[:, :, 0] - sensor_values[:, :, 0]
-    plt.pcolormesh(xout, yout, difference.T)
-    plt.xlabel('Gate 0 Voltage (V)')
-    plt.ylabel('Gate 1 Voltage (V)')
-    plt.title('Difference (Updated - Initial)')
-    plt.colorbar(label='Δ Sensor Conductance')
     
     plt.tight_layout()
     plt.savefig('qdarts_v5_barrier_comparison.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    
+    plt.show()
+
     # Print statistics
     print("\nSimulation Statistics:")
     print(f"  Initial sensor data shape: {sensor_values.shape}")
     print(f"  Initial sensor range: [{sensor_values[:, :, 0].min():.4f}, {sensor_values[:, :, 0].max():.4f}]")
     print(f"  Updated sensor data shape: {sensor_values2.shape}")
     print(f"  Updated sensor range: [{sensor_values2[:, :, 0].min():.4f}, {sensor_values2[:, :, 0].max():.4f}]")
-    print(f"  Maximum difference: {np.abs(difference).max():.4f}")
     
-    
-    print("  - qdarts_v5_barrier_comparison.png")
+    print("  Plot saved as: qdarts_v5_barrier_comparison.png")
 
 
 if __name__ == "__main__":
