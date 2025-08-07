@@ -2,6 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import yaml
+import json
 import os
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
 # Set matplotlib backend before importing pyplot to avoid GUI issues
@@ -37,7 +38,6 @@ class QuantumDeviceEnv(gym.Env):
         self.max_steps = self.config['env']['max_steps']
         self.current_step = 0
         self.tolerance = self.config['env']['tolerance']
-
 
         # --- Define Action and Observation Spaces ---
         self.num_voltages = self.config['env']['action_space']['num_voltages']  # Default to 2 gate voltages 
@@ -77,8 +77,8 @@ class QuantumDeviceEnv(gym.Env):
         self.obs_voltage_min = self.config['simulator']['measurement']['v_min']
         self.obs_voltage_max = self.config['simulator']['measurement']['v_max']
 
-        # --- Initialize Model (one-time setup) ---
-        self.model = self._load_model()
+        # --- Initialize Model ---
+        self.model = None
         
         # --- Initialize normalization parameters ---
         self._init_normalization_params()
@@ -233,10 +233,16 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         self.current_step = 0
+
+        #initialize the voltage scaler
+        self.scaler = np.random.uniform(0.33, 3.33)
         
         # Reset episode-specific normalization statistics
         self.episode_min = float('inf')
         self.episode_max = float('-inf')
+
+        # --- Initialize episode-specific Model ---
+        self.model = self._load_model()
 
 
         # Initialize episode-specific voltage state
@@ -249,7 +255,8 @@ class QuantumDeviceEnv(gym.Env):
             "vP2", center[1]+self.obs_voltage_min, center[1]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
         )
 
-        optimal_VG_center = self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center']) 
+        optimal_VG_center = self.model.optimal_Vg(self.config['simulator']['measurement']['optimal_VG_center'])
+        vg_current += optimal_VG_center
 
         # Device state variables (episode-specific)
         self.device_state = {
@@ -283,6 +290,10 @@ class QuantumDeviceEnv(gym.Env):
             truncated (bool): Whether the episode was cut short (e.g., time limit).
             info (dict): A dictionary with auxiliary diagnostic information.
         """
+
+        #scale the action
+        action = action * self.scaler
+
 
         # --- Update the environment's state based on the action ---
         self.current_step += 1
@@ -360,7 +371,7 @@ class QuantumDeviceEnv(gym.Env):
         # Reward = max_possible_distance - current_distance
         # This gives maximum reward when distance = 0 (perfect alignment)
         # and minimum reward (0) when distance = max_possible_distance (worst case)
-        reward = max(max_possible_distance - distance, 0)*0.01
+        reward = max(max_possible_distance - distance, 0)*0.1
 
 
         # Penalize for taking too many steps (small penalty to encourage efficiency)
@@ -374,33 +385,97 @@ class QuantumDeviceEnv(gym.Env):
 
         return reward
 
+    def _gen_random_qarray_params(self):
+        """
+        Generate random parameters for the quantum device.
+        """
+        rb = self.config['simulator']['model']
+        
+        latching = True 
+        
+        cdd_value = np.random.uniform(rb["Cdd"]["min"], rb["Cdd"]["max"])
+        p_inter = [
+            [0., np.random.uniform(rb["latching_model_parameters"]["p_inter"]["min"], rb["latching_model_parameters"]["p_inter"]["max"])],
+            [np.random.uniform(rb["latching_model_parameters"]["p_inter"]["min"], rb["latching_model_parameters"]["p_inter"]["max"]), 0.],
+        ]
+
+        p01 = np.random.uniform(rb["telegraph_noise_parameters"]["p01"]["min"], rb["telegraph_noise_parameters"]["p01"]["max"])
+        model_params = {
+            "Cdd": [[1, cdd_value], [cdd_value, 1]],
+            "Cgd": [
+                [
+                    np.random.uniform(*rb["Cgd"][0][0].values()),
+                    np.random.uniform(*rb["Cgd"][0][1].values()),
+                    np.random.uniform(*rb["Cgd"][0][2].values())
+                ],
+                [
+                    np.random.uniform(*rb["Cgd"][1][0].values()),
+                    np.random.uniform(*rb["Cgd"][1][1].values()),
+                    np.random.uniform(*rb["Cgd"][1][2].values())
+                ]
+            ],
+            "Cds": [[
+                np.random.uniform(rb["Cds"][0]["min"], rb["Cds"][0]["max"]),
+                np.random.uniform(rb["Cds"][1]["min"], rb["Cds"][1]["max"])
+            ]],
+            "Cgs": [[
+                np.random.uniform(rb["Cgs"][0]["min"], rb["Cgs"][0]["max"]),
+                np.random.uniform(rb["Cgs"][1]["min"], rb["Cgs"][1]["max"]),
+                rb["Cgs"][2]["fixed"]
+            ]],
+            "white_noise_amplitude": np.random.uniform(rb["white_noise_amplitude"]["min"], rb["white_noise_amplitude"]["max"]),
+            "telegraph_noise_parameters": {
+                "p01": p01,
+                "p10": np.random.uniform(rb["telegraph_noise_parameters"]["p10_factor"]["min"], rb["telegraph_noise_parameters"]["p10_factor"]["max"]) * p01,
+                "amplitude": np.random.uniform(rb["telegraph_noise_parameters"]["amplitude"]["min"], rb["telegraph_noise_parameters"]["amplitude"]["max"]),
+            },
+            "latching_model_parameters": {
+                "Exists": latching,
+                "n_dots": 2,
+                "p_leads": [
+                    np.random.uniform(rb["latching_model_parameters"]["p_leads"]["min"], rb["latching_model_parameters"]["p_leads"]["max"]),
+                    np.random.uniform(rb["latching_model_parameters"]["p_leads"]["min"], rb["latching_model_parameters"]["p_leads"]["max"])
+                ],
+                "p_inter": p_inter,
+            },
+            "T": np.random.uniform(rb["T"]["min"], rb["T"]["max"]),
+            "coulomb_peak_width": np.random.uniform(rb["coulomb_peak_width"]["min"], rb["coulomb_peak_width"]["max"]),
+            "algorithm": rb["algorithm"],
+            "implementation": rb["implementation"],
+            "max_charge_carriers": rb["max_charge_carriers"],
+        }
+        
+        return model_params
 
     def _load_model(self):
         """
         Load the model from the config file.
         """
-        white_noise = WhiteNoise(amplitude=self.config['simulator']['model']['white_noise_amplitude'])
-        telegraph_noise = TelegraphNoise(**self.config['simulator']['model']['telegraph_noise_parameters'])
+        # Generate random model parameters
+        model_params = self._gen_random_qarray_params()
+
+        # Load the model parameters
+        white_noise = WhiteNoise(amplitude=model_params['white_noise_amplitude'])
+        telegraph_noise = TelegraphNoise(**model_params['telegraph_noise_parameters'])
         noise_model = white_noise + telegraph_noise
-        latching_params = self.config['simulator']['model']['latching_model_parameters']
+        latching_params = model_params['latching_model_parameters']
         latching_model = LatchingModel(**{k: v for k, v in latching_params.items() if k != "Exists"}) if latching_params["Exists"] else None
 
-
         model = ChargeSensedDotArray(
-            Cdd=self.config['simulator']['model']['Cdd'],
-            Cgd=self.config['simulator']['model']['Cgd'],
-            Cds=self.config['simulator']['model']['Cds'],
-            Cgs=self.config['simulator']['model']['Cgs'],
-            coulomb_peak_width=self.config['simulator']['model']['coulomb_peak_width'],
-            T=self.config['simulator']['model']['T'],
+            Cdd=model_params['Cdd'],
+            Cgd=model_params['Cgd'],
+            Cds=model_params['Cds'],
+            Cgs=model_params['Cgs'],
+            coulomb_peak_width=model_params['coulomb_peak_width'],
+            T=model_params['T'],
             noise_model=noise_model,
             latching_model=latching_model,
-            algorithm=self.config['simulator']['model']['algorithm'],
-            implementation=self.config['simulator']['model']['implementation'],
-            max_charge_carriers=self.config['simulator']['model']['max_charge_carriers'],
+            algorithm=model_params['algorithm'],
+            implementation=model_params['implementation'],
+            max_charge_carriers=model_params['max_charge_carriers'],
         )
         
-        model.gate_voltage_composer.virtual_gate_matrix = self.config['simulator']['virtual_gate_matrix']
+        model.gate_voltage_composer.virtual_gate_matrix = np.array([[ 1, 0, 0], [0, 1, 0], [0, 0, 0]])
 
 
         return model
@@ -656,6 +731,8 @@ class QuantumDeviceEnv(gym.Env):
             config = yaml.safe_load(file)
             
         return config
+    
+        
 
 
 if __name__ == "__main__":
