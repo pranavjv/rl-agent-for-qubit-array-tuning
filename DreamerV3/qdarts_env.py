@@ -12,7 +12,6 @@ from typing import Dict, Any, Optional, Union, Tuple
 sys.path.append(os.path.dirname(__file__))
 
 # Import QDARTS components
-from qdarts_config_loader_v5 import load_qdarts_config
 from qdarts.experiment_with_barriers import Experiment
 
 # Set matplotlib backend before importing pyplot to avoid GUI issues
@@ -118,7 +117,7 @@ class QDartsEnv(gym.Env):
 
     def _load_qdarts_env_config(self, config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Load QDARTS environment configuration with random ranges support.
+        Load consolidated qdarts environment configuration.
         
         Args:
             config_path: Path to the QDARTS environment configuration file
@@ -129,156 +128,181 @@ class QDartsEnv(gym.Env):
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
         
-        # Load base QDARTS environment config
+        # Load consolidated config
         with open(config_path, 'r') as f:
-            env_config = yaml.safe_load(f)
+            config = yaml.safe_load(f)
         
-        # Load QDARTS config
-        qdarts_config_path = os.path.join(os.path.dirname(__file__), env_config['qdarts']['config_path'])
-        qdarts_config = load_qdarts_config(qdarts_config_path)
+        # Split config into env_config and qdarts_config for backward compatibility
+        env_config = {
+            'env': config['env'],
+            'training': config['training']
+        }
         
-        # Apply random ranges if specified
-        if 'random_ranges' in env_config['qdarts']:
-            qdarts_config = self._apply_random_ranges(qdarts_config, env_config['qdarts']['random_ranges'])
+        qdarts_config = {
+            'device': config['device'],
+            'simulator': config['simulator'],
+            'measurement': config['measurement']
+        }
         
-        # Set observation space resolution based on QDARTS config
+        # Set observation space resolution based on measurement config
         resolution = qdarts_config['measurement']['resolution']
         env_config['env']['observation_space']['image_size'] = [resolution, resolution]
         
         return env_config, qdarts_config
 
-    def _apply_random_ranges(self, qdarts_config: Dict[str, Any], random_ranges: Dict[str, Any]) -> Dict[str, Any]:
+    def _sample_random_ranges(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Apply random ranges to QDARTS configuration parameters.
+        Sample random values from ranges in the configuration.
         
         Args:
-            qdarts_config: Original QDARTS configuration
-            random_ranges: Random ranges configuration
+            config: Configuration dictionary with ranges
             
         Returns:
-            Updated QDARTS configuration with random values
+            Configuration with random values sampled from ranges
         """
-        # Apply random ranges to capacitance matrices
-        if 'capacitance' in random_ranges:
-            qdarts_config = self._apply_capacitance_random_ranges(qdarts_config, random_ranges['capacitance'])
+        sampled_config = {}
         
-        # Apply random ranges to tunneling parameters
-        if 'tunneling' in random_ranges:
-            qdarts_config = self._apply_tunneling_random_ranges(qdarts_config, random_ranges['tunneling'])
+        # Deep copy the config to avoid modifying the original
+        import copy
+        sampled_config = copy.deepcopy(config)
         
-        # Apply random ranges to barrier parameters
-        if 'barrier' in random_ranges:
-            qdarts_config = self._apply_barrier_random_ranges(qdarts_config, random_ranges['barrier'])
+        # Sample capacitance matrices
+        if 'simulator' in sampled_config and 'capacitance' in sampled_config['simulator']:
+            self._sample_capacitance_ranges(sampled_config['simulator']['capacitance'])
         
-        # Apply random ranges to sensor parameters
-        if 'sensor' in random_ranges:
-            qdarts_config = self._apply_sensor_random_ranges(qdarts_config, random_ranges['sensor'])
+        # Sample tunneling parameters
+        if 'simulator' in sampled_config and 'tunneling' in sampled_config['simulator']:
+            self._sample_tunneling_ranges(sampled_config['simulator']['tunneling'])
         
-        return qdarts_config
+        # Sample barrier parameters
+        if 'simulator' in sampled_config and 'barrier' in sampled_config['simulator']:
+            self._sample_barrier_ranges(sampled_config['simulator']['barrier'])
+        
+        # Sample sensor parameters
+        if 'simulator' in sampled_config and 'sensor' in sampled_config['simulator']:
+            self._sample_sensor_ranges(sampled_config['simulator']['sensor'])
+        
+        # Convert measurement configuration
+        if 'measurement' in sampled_config:
+            self._convert_measurement_config(sampled_config['measurement'])
+        
+        return sampled_config
 
-    def _apply_capacitance_random_ranges(self, qdarts_config: Dict[str, Any], capacitance_ranges: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply random ranges to capacitance parameters."""
-        capacitance_config = qdarts_config['simulator']['capacitance']
-        
-        # Apply to C_DD matrix
-        if 'C_DD' in capacitance_ranges:
+    def _sample_capacitance_ranges(self, capacitance_config: Dict[str, Any]) -> None:
+        """Sample random values for capacitance matrices."""
+        # Sample C_DD matrix
+        if 'C_DD' in capacitance_config:
             C_DD = capacitance_config['C_DD']
-            for i, row in enumerate(capacitance_ranges['C_DD']):
+            for i, row in enumerate(C_DD):
                 for j, range_dict in enumerate(row):
                     if isinstance(range_dict, dict) and 'min' in range_dict and 'max' in range_dict:
-                        min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-                        max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
+                        min_val = float(range_dict['min'])
+                        max_val = float(range_dict['max'])
                         C_DD[i][j] = np.random.uniform(min_val, max_val)
+            # Convert to numpy array
+            capacitance_config['C_DD'] = np.array(C_DD, dtype=np.float64)
         
-        # Apply to C_DG matrix
-        if 'C_DG' in capacitance_ranges:
+        # Sample C_DG matrix
+        if 'C_DG' in capacitance_config:
             C_DG = capacitance_config['C_DG']
-            for i, row in enumerate(capacitance_ranges['C_DG']):
+            for i, row in enumerate(C_DG):
                 for j, range_dict in enumerate(row):
                     if isinstance(range_dict, dict) and 'min' in range_dict and 'max' in range_dict:
-                        min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-                        max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
+                        min_val = float(range_dict['min'])
+                        max_val = float(range_dict['max'])
                         C_DG[i][j] = np.random.uniform(min_val, max_val)
+            # Convert to numpy array
+            capacitance_config['C_DG'] = np.array(C_DG, dtype=np.float64)
         
-        return qdarts_config
+        # Handle non-range values
+        if 'bounds_limits' in capacitance_config:
+            capacitance_config['bounds_limits'] = float(capacitance_config['bounds_limits'])
+        
+        if 'ks' in capacitance_config:
+            capacitance_config['ks'] = float(capacitance_config['ks'])
 
-    def _apply_tunneling_random_ranges(self, qdarts_config: Dict[str, Any], tunneling_ranges: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply random ranges to tunneling parameters."""
-        tunneling_config = qdarts_config['simulator']['tunneling']
-        
-        # Apply to tunnel_couplings matrix
-        if 'tunnel_couplings' in tunneling_ranges:
+    def _sample_tunneling_ranges(self, tunneling_config: Dict[str, Any]) -> None:
+        """Sample random values for tunneling parameters."""
+        # Sample tunnel_couplings matrix
+        if 'tunnel_couplings' in tunneling_config:
             tunnel_couplings = tunneling_config['tunnel_couplings']
-            for i, row in enumerate(tunneling_ranges['tunnel_couplings']):
+            for i, row in enumerate(tunnel_couplings):
                 for j, range_dict in enumerate(row):
                     if isinstance(range_dict, dict) and 'min' in range_dict and 'max' in range_dict:
-                        # Convert scientific notation strings to floats if needed
-                        min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-                        max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
+                        min_val = float(range_dict['min'])
+                        max_val = float(range_dict['max'])
                         tunnel_couplings[i][j] = np.random.uniform(min_val, max_val)
+            # Convert to numpy array
+            tunneling_config['tunnel_couplings'] = np.array(tunnel_couplings, dtype=np.float64)
         
-        # Apply to temperature
-        if 'temperature' in tunneling_ranges:
-            temp_range = tunneling_ranges['temperature']
-            min_temp = float(temp_range['min']) if isinstance(temp_range['min'], str) else temp_range['min']
-            max_temp = float(temp_range['max']) if isinstance(temp_range['max'], str) else temp_range['max']
-            tunneling_config['temperature'] = np.random.uniform(min_temp, max_temp)
+        # Sample temperature
+        if 'temperature' in tunneling_config and isinstance(tunneling_config['temperature'], dict):
+            temp_range = tunneling_config['temperature']
+            min_temp = float(temp_range['min'])
+            max_temp = float(temp_range['max'])
+            tunneling_config['temperature'] = float(np.random.uniform(min_temp, max_temp))
         
-        # Apply to energy_range_factor
-        if 'energy_range_factor' in tunneling_ranges:
-            energy_range = tunneling_ranges['energy_range_factor']
-            min_energy = float(energy_range['min']) if isinstance(energy_range['min'], str) else energy_range['min']
-            max_energy = float(energy_range['max']) if isinstance(energy_range['max'], str) else energy_range['max']
-            tunneling_config['energy_range_factor'] = np.random.uniform(min_energy, max_energy)
-        
-        return qdarts_config
+        # Sample energy_range_factor
+        if 'energy_range_factor' in tunneling_config and isinstance(tunneling_config['energy_range_factor'], dict):
+            energy_range = tunneling_config['energy_range_factor']
+            min_energy = float(energy_range['min'])
+            max_energy = float(energy_range['max'])
+            tunneling_config['energy_range_factor'] = float(np.random.uniform(min_energy, max_energy))
 
-    def _apply_barrier_random_ranges(self, qdarts_config: Dict[str, Any], barrier_ranges: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply random ranges to barrier parameters."""
-        barrier_config = qdarts_config['simulator']['barrier']
-        
-        if 'barrier_mappings' in barrier_ranges:
-            for barrier_name, ranges in barrier_ranges['barrier_mappings'].items():
-                if barrier_name in barrier_config['barrier_mappings']:
-                    barrier_mapping = barrier_config['barrier_mappings'][barrier_name]
-                    
-                    for param_name, range_dict in ranges.items():
-                        if param_name in barrier_mapping and isinstance(range_dict, dict):
-                            min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-                            max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
-                            barrier_mapping[param_name] = np.random.uniform(min_val, max_val)
-        
-        return qdarts_config
+    def _sample_barrier_ranges(self, barrier_config: Dict[str, Any]) -> None:
+        """Sample random values for barrier parameters."""
+        if 'barrier_mappings' in barrier_config:
+            for barrier_name, mapping in barrier_config['barrier_mappings'].items():
+                for param_name, range_dict in mapping.items():
+                    if isinstance(range_dict, dict) and 'min' in range_dict and 'max' in range_dict:
+                        min_val = float(range_dict['min'])
+                        max_val = float(range_dict['max'])
+                        mapping[param_name] = float(np.random.uniform(min_val, max_val))
 
-    def _apply_sensor_random_ranges(self, qdarts_config: Dict[str, Any], sensor_ranges: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply random ranges to sensor parameters."""
-        sensor_config = qdarts_config['simulator']['sensor']
-        
-        # Apply to sensor_detunings
-        if 'sensor_detunings' in sensor_ranges:
-            for i, range_dict in enumerate(sensor_ranges['sensor_detunings']):
+    def _sample_sensor_ranges(self, sensor_config: Dict[str, Any]) -> None:
+        """Sample random values for sensor parameters."""
+        # Sample sensor_detunings
+        if 'sensor_detunings' in sensor_config:
+            for i, range_dict in enumerate(sensor_config['sensor_detunings']):
                 if isinstance(range_dict, dict) and 'min' in range_dict and 'max' in range_dict:
-                    min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-                    max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
+                    min_val = float(range_dict['min'])
+                    max_val = float(range_dict['max'])
                     sensor_config['sensor_detunings'][i] = np.random.uniform(min_val, max_val)
+            # Convert to numpy array
+            sensor_config['sensor_detunings'] = np.array(sensor_config['sensor_detunings'], dtype=np.float64)
         
-        # Apply to noise_amplitude
-        if 'noise_amplitude' in sensor_ranges:
-            noise_config = sensor_config['noise_amplitude']
-            for noise_type, range_dict in sensor_ranges['noise_amplitude'].items():
-                if noise_type in noise_config and isinstance(range_dict, dict):
-                    min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-                    max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
-                    noise_config[noise_type] = np.random.uniform(min_val, max_val)
+        # Sample noise_amplitude
+        if 'noise_amplitude' in sensor_config:
+            for noise_type, range_dict in sensor_config['noise_amplitude'].items():
+                if isinstance(range_dict, dict) and 'min' in range_dict and 'max' in range_dict:
+                    min_val = float(range_dict['min'])
+                    max_val = float(range_dict['max'])
+                    sensor_config['noise_amplitude'][noise_type] = float(np.random.uniform(min_val, max_val))
         
-        # Apply to peak_width_multiplier
-        if 'peak_width_multiplier' in sensor_ranges:
-            range_dict = sensor_ranges['peak_width_multiplier']
-            min_val = float(range_dict['min']) if isinstance(range_dict['min'], str) else range_dict['min']
-            max_val = float(range_dict['max']) if isinstance(range_dict['max'], str) else range_dict['max']
-            sensor_config['peak_width_multiplier'] = np.random.uniform(min_val, max_val)
+        # Sample peak_width_multiplier
+        if 'peak_width_multiplier' in sensor_config and isinstance(sensor_config['peak_width_multiplier'], dict):
+            range_dict = sensor_config['peak_width_multiplier']
+            min_val = float(range_dict['min'])
+            max_val = float(range_dict['max'])
+            sensor_config['peak_width_multiplier'] = float(np.random.uniform(min_val, max_val))
         
-        return qdarts_config
+        # Handle non-range values
+        if 'sensor_dot_indices' in sensor_config:
+            sensor_config['sensor_dot_indices'] = np.array(sensor_config['sensor_dot_indices'], dtype=int)
+        
+        if 'sensor_gate_indices' in sensor_config:
+            sensor_config['sensor_gate_indices'] = np.array(sensor_config['sensor_gate_indices'], dtype=int)
+
+    def _convert_measurement_config(self, measurement_config: Dict[str, Any]) -> None:
+        """Convert measurement configuration to proper types."""
+        if 'voltage_range' in measurement_config:
+            if 'min' in measurement_config['voltage_range']:
+                measurement_config['voltage_range']['min'] = np.array(measurement_config['voltage_range']['min'], dtype=np.float64)
+            if 'max' in measurement_config['voltage_range']:
+                measurement_config['voltage_range']['max'] = np.array(measurement_config['voltage_range']['max'], dtype=np.float64)
+        
+        if 'sweep_matrix' in measurement_config:
+            measurement_config['sweep_matrix'] = np.array(measurement_config['sweep_matrix'], dtype=np.float64)
 
     def _init_normalization_params(self):
         """
@@ -300,15 +324,18 @@ class QDartsEnv(gym.Env):
 
     def _load_model(self):
         """
-        Load QDARTS model with barrier support.
+        Load QDARTS model with barrier support using sampled configuration.
         """
-        # Extract configurations (exactly like qdarts_v5.py)
-        capacitance_config = self.qdarts_config['simulator']['capacitance']
-        tunneling_config = self.qdarts_config['simulator']['tunneling']
-        sensor_config = self.qdarts_config['simulator']['sensor']
-        barrier_config = self.qdarts_config['simulator']['barrier']
+        # Sample random values from ranges for this episode
+        sampled_qdarts_config = self._sample_random_ranges(self.qdarts_config)
         
-        # Create QDARTS experiment (exactly like qdarts_v5.py)
+        # Extract configurations from sampled config
+        capacitance_config = sampled_qdarts_config['simulator']['capacitance']
+        tunneling_config = sampled_qdarts_config['simulator']['tunneling']
+        sensor_config = sampled_qdarts_config['simulator']['sensor']
+        barrier_config = sampled_qdarts_config['simulator']['barrier']
+        
+        # Create QDARTS experiment
         self.experiment = Experiment(
             capacitance_config=capacitance_config,
             tunneling_config=tunneling_config,
@@ -317,7 +344,7 @@ class QDartsEnv(gym.Env):
             print_logs=self.debug
         )
         
-        # Set initial barrier voltages (exactly like qdarts_v5.py)
+        # Set initial barrier voltages
         initial_barrier_voltages = barrier_config['default_barrier_voltages']
         self.experiment.update_tunnel_couplings(initial_barrier_voltages)
         
