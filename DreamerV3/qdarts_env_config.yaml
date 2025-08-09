@@ -1,0 +1,73 @@
+# QDARTS Environment Configuration - Combines QDARTS and RL environment configs
+
+# QDARTS Configuration (imported from qdarts_config_v5.yaml)
+qdarts:
+  config_path: "qdarts_config_v5.yaml"
+  
+  # Override QDARTS parameters with random ranges for testing
+  random_ranges:
+    capacitance:
+      C_DD:
+        - [{"min": 0.8, "max": 1.2}, {"min": 0.1, "max": 0.3}, {"min": 0.05, "max": 0.15}]
+        - [{"min": 0.1, "max": 0.3}, {"min": 0.8, "max": 1.2}, {"min": 0.05, "max": 0.15}]
+        - [{"min": 0.05, "max": 0.15}, {"min": 0.05, "max": 0.15}, {"min": 0.8, "max": 1.2}]
+      C_DG:
+        - [{"min": 0.6, "max": 0.9}, {"min": 0.05, "max": 0.15}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0.01, "max": 0.03}]
+        - [{"min": 0.05, "max": 0.15}, {"min": 0.6, "max": 0.9}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0.01, "max": 0.03}]
+        - [{"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0.8, "max": 1.2}]
+    
+    tunneling:
+      tunnel_couplings:
+        - [{"min": 0, "max": 0}, {"min": 20e-4, "max": 40e-4}, {"min": 0, "max": 0}]
+        - [{"min": 20e-4, "max": 40e-4}, {"min": 0, "max": 0}, {"min": 0, "max": 0}]
+        - [{"min": 0, "max": 0}, {"min": 0, "max": 0}, {"min": 0, "max": 0}]
+      temperature: {"min": 0.5, "max": 2.0}
+      energy_range_factor: {"min": 3.0, "max": 7.0}
+    
+    barrier:
+      barrier_mappings:
+        barrier_2:
+          base_coupling: {"min": 20e-4, "max": 40e-4}
+          alpha: {"min": 1.5, "max": 2.5}
+          voltage_offset: {"min": -0.1, "max": 0.1}
+        barrier_3:
+          base_coupling: {"min": 20e-4, "max": 40e-4}
+          alpha: {"min": 1.0, "max": 2.0}
+          voltage_offset: {"min": -0.1, "max": 0.1}
+        barrier_4:
+          base_coupling: {"min": 20e-4, "max": 40e-4}
+          alpha: {"min": 1.5, "max": 2.5}
+          voltage_offset: {"min": -0.1, "max": 0.1}
+    
+    sensor:
+      sensor_detunings: [{"min": 0.0003, "max": 0.0007}]
+      noise_amplitude:
+        fast_noise: {"min": 5e-5, "max": 2e-4}
+        slow_noise: {"min": 5e-6, "max": 2e-5}
+      peak_width_multiplier: {"min": 150, "max": 250}
+
+# Environment Configuration
+env:
+  max_steps: 50
+  action_space:
+    plungers:
+      num_voltages: 2
+      voltage_range: [-5.0, 5.0]
+    barriers:
+      num_voltages: 3
+      voltage_range: [-2.0, 2.0]
+  observation_space:
+    # Flexible resolution - will be set based on QDARTS config
+    image_size: "auto"  # Will be set to [resolution, resolution] from QDARTS
+    channels: 1
+    normalization_range: [0.0, 1.0]
+    dtype: "float32"
+    voltage_shape: 5
+  tolerance: 0.5
+
+# Training Configuration
+training:
+  seed: 42
+  debug: false
+  render_fps: 10
+  render_mode: "human" 
