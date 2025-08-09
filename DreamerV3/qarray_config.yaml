@@ -12,7 +12,7 @@ simulator:
       - [{"min": 0.0, "max": 0.35}, {"min": 0.7, "max": 1.0}, {"min": 0.0, "max": 0.1}]
     
     # Dot-to-sensor capacitance matrix
-    Cds: [[0.08, 0.08]]
+    Cds: [[0.03, 0.08]]
     
     # Gate-to-sensor capacitance matrix
     Cgs: [[0.03, 0.03, 1]]
