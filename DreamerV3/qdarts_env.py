@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import io
 
 
-class QDARTSEnv(gym.Env):
+class QDartsEnv(gym.Env):
     """
     QDARTS-based quantum device environment with barrier support.
     
@@ -70,8 +70,8 @@ class QDARTSEnv(gym.Env):
         
         # Combined action space: [plunger1, plunger2, barrier1, barrier2, barrier3]
         self.action_space = spaces.Box(
-            low=np.array([self.plunger_voltage_min] * 2 + [self.barrier_voltage_min] * 3),
-            high=np.array([self.plunger_voltage_max] * 2 + [self.barrier_voltage_max] * 3),
+            low=np.array([self.plunger_voltage_min] * 2 + [self.barrier_voltage_min] * 3, dtype=np.float32),
+            high=np.array([self.plunger_voltage_max] * 2 + [self.barrier_voltage_max] * 3, dtype=np.float32),
             shape=(5,),  # 2 plungers + 3 barriers
             dtype=np.float32
         )
@@ -95,8 +95,8 @@ class QDARTSEnv(gym.Env):
                 dtype=np.uint8
             ),
             'voltages': spaces.Box(
-                low=np.array([self.plunger_voltage_min] * 2 + [self.barrier_voltage_min] * 3),
-                high=np.array([self.plunger_voltage_max] * 2 + [self.barrier_voltage_max] * 3),
+                low=np.array([self.plunger_voltage_min] * 2 + [self.barrier_voltage_min] * 3, dtype=np.float32),
+                high=np.array([self.plunger_voltage_max] * 2 + [self.barrier_voltage_max] * 3, dtype=np.float32),
                 shape=(5,),  # 2 plungers + 3 barriers
                 dtype=np.float32
             )
@@ -783,6 +783,8 @@ class QDARTSEnv(gym.Env):
         # Convert to RGB array
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        plt.savefig('test.png', format='png', dpi=100, bbox_inches='tight')
+
         buf.seek(0)
         img_array = plt.imread(buf)
         plt.close()
@@ -816,3 +818,9 @@ class QDARTSEnv(gym.Env):
         if seed is not None:
             np.random.seed(seed)
         return [seed] 
+
+if __name__ == "__main__":
+    env = QDartsEnv()
+    env.reset()
+    env.render()
+    env.close()
