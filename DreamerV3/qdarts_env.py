@@ -711,15 +711,17 @@ class QDartsEnv(gym.Env):
 
         self.device_state["previous_distance"] = distance
 
-        print(f"distance: {distance}")
-        print(f"previous_distance: {previous_distance}")
-        print(f"total_reward: {total_reward}")
+        if self.debug:
+            print(f"distance: {distance}")
+            print(f"previous_distance: {previous_distance}")
+            print(f"total_reward: {total_reward}")
 
         # Termination bonus
         if distance < self.tolerance:
             total_reward += 200.0
             terminated = True
-            print(f"terminated")
+            if self.debug:
+                print(f"terminated")
         
         return total_reward, terminated
 
@@ -801,9 +803,14 @@ class QDartsEnv(gym.Env):
         # Initialize episode-specific voltage state
         # Center of current window
         centers = self._random_center()
+        barrier_voltages = {
+            'barrier_2': centers[-3],
+            'barrier_3': centers[-2], 
+            'barrier_4': centers[-1]
+        }
+        self.experiment.update_tunnel_couplings(barrier_voltages)
         
 
-        #Ground truth barrier voltages
         
         # Compute ground truth barrier targets for cutoff tunnel coupling
         barrier_config = self.experiment.barrier_config
@@ -901,7 +908,7 @@ class QDartsEnv(gym.Env):
         if self.render_mode == "rgb_array":
             return self._render_frame()
         elif self.render_mode == "human":
-            self._render_frame(title)
+            self._render_frame(title=title)
             return None
 
     def _render_frame(self, inference_plot=False, title=None):
@@ -1034,14 +1041,21 @@ class QDartsEnv(gym.Env):
             np.random.seed(seed)
         return [seed] 
 
+
+def get_ground_truths(env):
+    """
+    Get the ground truths for the plunger and barrier voltages.
+    """
+    return np.concatenate([env.device_state["ground_truth_plungers"], env.device_state["ground_truth_barrier_voltages"]])  
+
 if __name__ == "__main__":
     env = QDartsEnv()
     env.reset()
     env.render(title="initial")
 
     #test setting action to ground truth plunger and barrier voltages
-    ground_truth_plungers = env.device_state["ground_truth_plungers"]
-    ground_truth_barriers = env.device_state["ground_truth_barrier_voltages"]
-    action = np.concatenate([ground_truth_plungers, ground_truth_barriers])
-    env.step(action)
+    ground_truths = get_ground_truths(env)
+    print(f"Ground truths: {ground_truths}")
+    action = ground_truths
+    env.step(action*2)
     env.render(title="ground_truth")
