@@ -23,11 +23,11 @@ import io
 
 class QDartsEnv(gym.Env):
     """
-    QDARTS-based quantum device environment with barrier support.
+    qdarts-based quantum device environment with barrier support.
     
     This environment extends the original qarray_env.py to support:
     - 5 gates (2 plungers + 3 barriers)
-    - QDARTS physics model with exponential barrier effects
+    - qdarts physics model with exponential barrier effects
     - Flexible observation space based on config resolution
     - Multi-objective reward function
     """
@@ -37,7 +37,7 @@ class QDartsEnv(gym.Env):
 
     def __init__(self, config_path='qdarts_env_config.yaml', render_mode=None, **kwargs):
         """
-        Initialize the QDARTS environment.
+        Initialize the qdarts environment.
         
         Args:
             config_path: Path to the QDARTS environment configuration file
@@ -101,26 +101,26 @@ class QDartsEnv(gym.Env):
             )
         })
 
-        # --- Initialize Model ---
+        # --- Initialize Model Variable ---
         self.experiment = None
         
         # --- Initialize normalization parameters ---
         self._init_normalization_params()
 
         # --- For Rendering --- 
-        self.render_fps = self.env_config['training']['render_fps']
         self.render_mode = render_mode or self.env_config['training']['render_mode']
         
         # --- Initialize observation storage ---
         self.z = None
         self.device_state = {}
 
+
     def _load_qdarts_env_config(self, config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Load consolidated qdarts environment configuration.
         
         Args:
-            config_path: Path to the QDARTS environment configuration file
+            config_path: Path to the qdarts environment configuration file
             
         Returns:
             Tuple of (env_config, qdarts_config)
@@ -149,6 +149,7 @@ class QDartsEnv(gym.Env):
         env_config['env']['observation_space']['image_size'] = [resolution, resolution]
         
         return env_config, qdarts_config
+
 
     def _sample_random_ranges(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -188,6 +189,7 @@ class QDartsEnv(gym.Env):
         
         return sampled_config
 
+
     def _sample_capacitance_ranges(self, capacitance_config: Dict[str, Any]) -> None:
         """Sample random values for capacitance matrices."""
         # Sample C_DD matrix
@@ -220,6 +222,7 @@ class QDartsEnv(gym.Env):
         
         if 'ks' in capacitance_config:
             capacitance_config['ks'] = float(capacitance_config['ks'])
+            
 
     def _sample_tunneling_ranges(self, tunneling_config: Dict[str, Any]) -> None:
         """Sample random values for tunneling parameters."""
@@ -304,6 +307,160 @@ class QDartsEnv(gym.Env):
         if 'sweep_matrix' in measurement_config:
             measurement_config['sweep_matrix'] = np.array(measurement_config['sweep_matrix'], dtype=np.float64)
 
+    def _compute_ground_truth_barrier_targets(self, barrier_config: Dict[str, Any]) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, bool], Dict[str, float]]:
+        """
+        Compute the ground truth barrier voltages that achieve cutoff tunnel coupling.
+        
+        Args:
+            barrier_config: Sampled barrier configuration for this episode
+            
+        Returns:
+            targets_clamped: Dict mapping barrier_name to clamped target voltage
+            targets_raw: Dict mapping barrier_name to raw computed target voltage
+            reachable: Dict mapping barrier_name to whether target is reachable within bounds
+            epsilons_used: Dict mapping barrier_name to epsilon threshold used
+        """
+        targets_clamped = {}
+        targets_raw = {}
+        reachable = {}
+        epsilons_used = {}
+        
+        epsilon_abs = barrier_config.get('cutoff_coupling_abs', 3e-5)
+        # Ensure epsilon is positive and not too small for numerical stability
+        epsilon_abs = max(float(epsilon_abs), 1e-12)
+        
+        barrier_mappings = barrier_config['barrier_mappings']
+        
+        for barrier_name, mapping in barrier_mappings.items():
+            try:
+                # Extract parameters for this barrier
+                base_coupling = float(mapping['base_coupling'])
+                alpha = float(mapping['alpha'])
+                voltage_offset = float(mapping['voltage_offset'])
+                
+                # Validate parameters
+                if base_coupling <= 0 or alpha <= 0:
+                    # Invalid parameters, mark as unreachable
+                    targets_raw[barrier_name] = self.barrier_voltage_max
+                    targets_clamped[barrier_name] = self.barrier_voltage_max
+                    reachable[barrier_name] = False
+                    epsilons_used[barrier_name] = epsilon_abs
+                    continue
+                
+                # Compute target voltage for coupling <= epsilon
+                # coupling(V) = base_cobarrier_nameupling * exp(-alpha * (V - voltage_offset))
+                # Solve for coupling <= epsilon: V = offset + (ln(base) - ln(epsilon)) / alpha
+                if base_coupling <= epsilon_abs:
+                    # Base coupling is already below threshold, any voltage >= offset works
+                    V_epsilon_raw = voltage_offset
+                else:
+                    V_epsilon_raw = voltage_offset + (np.log(base_coupling) - np.log(epsilon_abs)) / alpha
+                
+                # Clamp to action bounds
+                V_epsilon_clamped = np.clip(V_epsilon_raw, self.barrier_voltage_min, self.barrier_voltage_max)
+                
+                # Check reachability: target is reachable if Vmax >= V_epsilon_raw
+                is_reachable = self.barrier_voltage_max >= V_epsilon_raw
+                
+                # Store results
+                targets_raw[barrier_name] = V_epsilon_raw
+                targets_clamped[barrier_name] = V_epsilon_clamped
+                reachable[barrier_name] = is_reachable
+                epsilons_used[barrier_name] = epsilon_abs
+                
+                if self.debug:
+                    print(f"Barrier {barrier_name}: base={base_coupling:.2e}, alpha={alpha:.2f}, offset={voltage_offset:.3f}")
+                    print(f"  Target raw: {V_epsilon_raw:.3f}, clamped: {V_epsilon_clamped:.3f}, reachable: {is_reachable}")
+                
+            except (KeyError, ValueError, TypeError) as e:
+                # Handle any errors in parameter extraction
+                if self.debug:
+                    print(f"Error computing target for {barrier_name}: {e}")
+                
+                # Default to maximum voltage if computation fails
+                targets_raw[barrier_name] = self.barrier_voltage_max
+                targets_clamped[barrier_name] = self.barrier_voltage_max
+                reachable[barrier_name] = False
+                epsilons_used[barrier_name] = epsilon_abs
+        
+        return targets_clamped, targets_raw, reachable, epsilons_used
+
+    def _check_couplings_below_cutoff(self) -> Tuple[bool, Dict[str, float], Dict[str, bool]]:
+        """
+        Check if current tunnel couplings are below the cutoff threshold.
+        
+        Returns:
+            all_below_cutoff: True if all relevant couplings are below threshold
+            current_couplings: Dict mapping coupling location to current value
+            couplings_below: Dict mapping coupling location to whether it's below threshold
+        """
+        if self.experiment is None:
+            return False, {}, {}
+        
+        try:
+            # Get current tunnel couplings from the experiment
+            current_couplings_matrix = self.experiment.get_current_tunnel_couplings()
+            
+            # Extract relevant couplings based on barrier mappings
+            barrier_config = self.experiment.barrier_config['barrier_mappings']
+            epsilon_abs = barrier_config.get('cutoff_coupling_abs', 3e-5)
+            
+            current_couplings = {}
+            couplings_below = {}
+            
+            # Check each barrier's effect on couplings
+            for barrier_name, mapping in barrier_config['barrier_mappings'].items():
+                coupling_type = mapping['coupling_type']
+                
+                if coupling_type == "dot_to_dot":
+                    # Dot-to-dot coupling affects symmetric entries
+                    target_dots = mapping['target_dots']
+                    if len(target_dots) == 2:
+                        i, j = target_dots[0], target_dots[1]
+                        coupling_value = current_couplings_matrix[i, j]
+                        coupling_key = f"dot_{i}_to_dot_{j}"
+                        current_couplings[coupling_key] = coupling_value
+                        couplings_below[coupling_key] = coupling_value <= epsilon_abs
+                        
+                        # Also check symmetric entry
+                        coupling_value_sym = current_couplings_matrix[j, i]
+                        coupling_key_sym = f"dot_{j}_to_dot_{i}"
+                        current_couplings[coupling_key_sym] = coupling_value_sym
+                        couplings_below[coupling_key_sym] = coupling_value_sym <= epsilon_abs
+                
+                elif coupling_type == "reservoir_to_dot":
+                    # Reservoir coupling affects one entry
+                    target_dot = mapping['target_dot']
+                    coupling_value = current_couplings_matrix[target_dot, target_dot]  # Diagonal entry for reservoir
+                    coupling_key = f"reservoir_to_dot_{target_dot}"
+                    current_couplings[coupling_key] = coupling_value
+                    couplings_below[coupling_key] = coupling_value <= epsilon_abs
+                
+                elif coupling_type == "dot_to_reservoir":
+                    # Dot to reservoir coupling affects one entry
+                    target_dot = mapping['target_dot']
+                    coupling_value = current_couplings_matrix[target_dot, target_dot]  # Diagonal entry for reservoir
+                    coupling_key = f"dot_{target_dot}_to_reservoir"
+                    current_couplings[coupling_key] = coupling_value
+                    couplings_below[coupling_key] = coupling_value <= epsilon_abs
+            
+            # Check if all relevant couplings are below threshold
+            all_below_cutoff = all(couplings_below.values()) if couplings_below else False
+            
+            if self.debug:
+                print(f"Current couplings: {current_couplings}")
+                print(f"Couplings below cutoff: {couplings_below}")
+                print(f"All below cutoff: {all_below_cutoff}")
+            
+            return all_below_cutoff, current_couplings, couplings_below
+            
+        except Exception as e:
+            if self.debug:
+                print(f"Error checking couplings: {e}")
+            return False, {}, {}
+
+
+
     def _init_normalization_params(self):
         """
         Initialize adaptive normalization parameters.
@@ -324,7 +481,7 @@ class QDartsEnv(gym.Env):
 
     def _load_model(self):
         """
-        Load QDARTS model with barrier support using sampled configuration.
+        Load qdarts model with barrier support using sampled configuration.
         """
         # Sample random values from ranges for this episode
         sampled_qdarts_config = self._sample_random_ranges(self.qdarts_config)
@@ -355,23 +512,22 @@ class QDartsEnv(gym.Env):
         Get current observation with flexible resolution based on config.
         """
         # Get charge sensor data using QDARTS
-        current_voltages = self.device_state["current_voltages"]
+        current_plungers = self.device_state["current_plunger_voltages"]
+        current_barrier_voltages = self.device_state["current_barrier_voltages"]
+
+        current_voltages = self._build_voltage_grid(current_plungers)
+
         self.z = self._get_charge_sensor_data_qdarts(current_voltages)
         z = self.z
         
         # Extract and normalize image observation (flexible resolution)
         channel_data = z[:, :, 0]  # Shape: (resolution, resolution)
+
         image_obs = self._normalize_observation(channel_data)
         
-        # Extract voltage centers for plungers
-        plunger_centers = self._extract_voltage_centers(current_voltages)
-        
-        # Get barrier voltages
-        barrier_voltages = self.device_state.get("current_barrier_voltages", np.zeros(3))
-        
         # Combine all voltages
-        all_voltages = np.concatenate([plunger_centers, barrier_voltages])
-        
+        all_voltages = np.concatenate([current_plungers, current_barrier_voltages])
+
         observation = {
             'image': image_obs,  # Shape: (resolution, resolution, 1)
             'voltages': all_voltages  # Shape: (5,)
@@ -381,24 +537,14 @@ class QDartsEnv(gym.Env):
 
     def _get_charge_sensor_data_qdarts(self, voltages):
         """
-        Get charge sensor data using QDARTS (based on qdarts_v5.py).
+        Get charge sensor data using qdarts 
         """
-        # Extract measurement configuration (based on qdarts_v5.py)
         measurement = self.qdarts_config['measurement']
         
-        # Create voltage ranges (based on qdarts_v5.py)
-        x_voltages = np.linspace(
-            measurement['voltage_range']['min'][0], 
-            measurement['voltage_range']['max'][0], 
-            measurement['resolution']
-        )
-        y_voltages = np.linspace(
-            measurement['voltage_range']['min'][1], 
-            measurement['voltage_range']['max'][1], 
-            measurement['resolution']
-        )
-        
-        # Convert sweep matrix to plane axes (based on qdarts_v5.py)
+        # Unpack the tuple: (x_voltages, y_voltages, barrier_voltages)
+        x_voltages, y_voltages, _ = voltages
+
+
         sweep_matrix = measurement['sweep_matrix']
         plane_axes = []
         for i in range(2):
@@ -411,7 +557,7 @@ class QDartsEnv(gym.Env):
         if len(plane_axes) < 2:
             plane_axes = [0, 1]  # Default to first two gates
         
-        # Generate CSD using QDARTS (based on qdarts_v5.py)
+        # Generate CSD using qdarts
         try:
             xout, yout, _, polytopes, sensor_values, v_offset = self.experiment.generate_CSD(
                 x_voltages=x_voltages,
@@ -422,8 +568,8 @@ class QDartsEnv(gym.Env):
                 compensate_sensors=True,
                 compute_polytopes=False
             )
-            
             return sensor_values  # Shape: (resolution, resolution, num_sensors)
+            
         except Exception as e:
             if self.debug:
                 print(f"Error generating CSD: {e}")
@@ -473,20 +619,43 @@ class QDartsEnv(gym.Env):
 
     def _extract_voltage_centers(self, voltages):
         """
-        Extract voltage centers from the voltage grid.
+        Extract voltage centers from the voltage arrays.
         """
-        # For QDARTS, we need to extract the center voltages from the grid
-        # This is similar to the original implementation but adapted for QDARTS
-        if len(voltages.shape) == 3:
-            # 3D voltage grid: (height, width, num_gates)
-            height, width, num_gates = voltages.shape
-            center_i, center_j = height // 2, width // 2
-            centers = voltages[center_i, center_j, :2]  # Only first 2 gates (plungers)
-        else:
-            # Fallback: use zeros if voltage grid is not available
-            centers = np.zeros(2)
+        # Unpack the tuple: (x_voltages, y_voltages, barrier_voltages)
+        x_voltages, y_voltages, _ = voltages
         
-        return centers 
+        # Extract center voltages from the 1D arrays
+        center_x = x_voltages[len(x_voltages) // 2]  # Middle of x array
+        center_y = y_voltages[len(y_voltages) // 2]  # Middle of y array
+        
+        return np.array([center_x, center_y])
+    
+    def _build_voltage_grid(self, center):
+        """
+        Build voltage arrays centered around the given center.
+        Returns 1D arrays for x and y axes plus barrier voltages.
+        """
+        measurement = self.qdarts_config['measurement']
+        resolution = measurement['resolution']
+        
+        # Get current barrier voltages from device state
+        current_barriers = self.device_state.get("current_barrier_voltages", np.zeros(3))
+        
+        # Create 1D voltage arrays centered around the current plunger positions
+        x_voltages = np.linspace(
+            measurement['voltage_range']['min'][0] + center[0], 
+            measurement['voltage_range']['max'][0] + center[0], 
+            resolution
+        )
+        y_voltages = np.linspace(
+            measurement['voltage_range']['min'][1] + center[1], 
+            measurement['voltage_range']['max'][1] + center[1], 
+            resolution
+        )
+        
+        # Return tuple of 1D arrays: (x_voltages, y_voltages, barrier_voltages)
+        return x_voltages, y_voltages, current_barriers
+        
 
     def _apply_voltages(self, action):
         """
@@ -498,137 +667,102 @@ class QDartsEnv(gym.Env):
         # Split action into plungers and barriers
         plungers = action[:2]  # First 2 elements
         barriers = action[2:]  # Last 3 elements
-        
-        # Apply plunger voltages (same logic as current)
-        self._apply_plunger_voltages(plungers)
-        
-        # Apply barrier voltages (new - based on qdarts_v5.py)
-        self._apply_barrier_voltages(barriers)
 
-    def _apply_plunger_voltages(self, plungers):
-        """
-        Apply plunger voltages (same logic as current _apply_voltages).
-        """
-        # Create 2D grids centered around plunger voltages
-        measurement = self.qdarts_config['measurement']
-        resolution = measurement['resolution']
-        
-        x_grid = np.linspace(
-            measurement['voltage_range']['min'][0], 
-            measurement['voltage_range']['max'][0], 
-            resolution
-        )
-        y_grid = np.linspace(
-            measurement['voltage_range']['min'][1], 
-            measurement['voltage_range']['max'][1], 
-            resolution
-        )
-        
-        X, Y = np.meshgrid(x_grid + plungers[0], y_grid + plungers[1])
-        
-        # Update voltage grids - create 3D array for compatibility
-        if 'current_voltages' not in self.device_state:
-            self.device_state["current_voltages"] = np.zeros((resolution, resolution, 6))  # 6 gates total
-        
-        self.device_state["current_voltages"][:,:,0] = X
-        self.device_state["current_voltages"][:,:,1] = Y
+        self.device_state["current_plunger_voltages"] = plungers
+        self.device_state["current_barrier_voltages"] = barriers
 
-    def _apply_barrier_voltages(self, barriers):
-        """
-        Apply barrier voltages and update tunnel couplings (based on qdarts_v5.py).
-        """
-        # Convert barriers to dictionary format expected by QDARTS
+
         barrier_voltages = {
             'barrier_2': barriers[0],
             'barrier_3': barriers[1], 
             'barrier_4': barriers[2]
         }
+        self.experiment.update_tunnel_couplings(barrier_voltages)
+
+    def _get_distance(self):
+        """
+        Get the distance vector between the current state and the target state.
+        """
+        plunger_truth_center = self.device_state["ground_truth_plungers"][:2]
+        barrier_truth_center = self.device_state["ground_truth_barrier_voltages"]
         
-        # Update tunnel couplings in QDARTS experiment (exactly like qdarts_v5.py)
-        if self.experiment is not None:
-            self.experiment.update_tunnel_couplings(barrier_voltages)
-        
-        # Store current barrier voltages
-        self.device_state["current_barrier_voltages"] = barriers
+        plunger_voltages = self.device_state["current_plunger_voltages"]
+        barrier_voltages = self.device_state["current_barrier_voltages"]
+
+
+        plunger_difference_vector = plunger_truth_center - plunger_voltages
+        barrier_difference_vector = (barrier_truth_center - barrier_voltages)*0.5
+
+        total_difference_vector = np.concatenate([plunger_difference_vector, barrier_difference_vector])
+        return np.linalg.norm(total_difference_vector)
 
     def _get_reward(self):
         """
         Enhanced reward function considering both plunger alignment and barrier optimization.
         """
-        # Plunger alignment reward (same as current)
-        ground_truth_center = self.device_state["ground_truth_center"][:2]
-        current_plunger_center = self._extract_voltage_centers(self.device_state["current_voltages"])
-        plunger_distance = np.linalg.norm(ground_truth_center - current_plunger_center)
+        terminated = False
         
-        # Barrier optimization reward (new)
-        barrier_reward = self._calculate_barrier_reward()
+        # Difference Vector
+        distance = self._get_distance()
+        previous_distance = self.device_state["previous_distance"]
         
-        # Combined reward
-        plunger_reward = max(self.max_possible_distance - plunger_distance, 0) * 0.1
-        total_reward = plunger_reward + barrier_reward * 0.05  # Weight barrier reward less
-        
+        # Progress reward minus distance penalty to encourage quick termination
+        total_reward = (previous_distance - distance) - distance * 0.1
+
+        self.device_state["previous_distance"] = distance
+
+        print(f"distance: {distance}")
+        print(f"previous_distance: {previous_distance}")
+        print(f"total_reward: {total_reward}")
+
         # Termination bonus
-        if self._is_at_target():
+        if distance < self.tolerance:
             total_reward += 200.0
+            terminated = True
+            print(f"terminated")
         
-        return total_reward
+        return total_reward, terminated
 
-    def _calculate_barrier_reward(self):
-        """
-        Calculate reward based on barrier optimization.
-        """
-        # Get current tunnel couplings
-        if self.experiment is not None:
-            try:
-                current_couplings = self.experiment.get_current_tunnel_couplings()
-            except:
-                # If we can't get current couplings, return 0
-                return 0.0
-        else:
-            return 0.0
-        
-        # Define target coupling strengths (could be configurable)
-        target_couplings = np.array([
-            [0, 30e-4, 0],
-            [30e-4, 0, 0], 
-            [0, 0, 0]
-        ])
-        
-        # Calculate coupling alignment reward
-        coupling_distance = np.linalg.norm(current_couplings - target_couplings)
-        max_coupling_distance = np.linalg.norm(target_couplings)
-        
-        return max(max_coupling_distance - coupling_distance, 0)
 
-    def _is_at_target(self):
-        """
-        Check if the current state is at the target.
-        """
-        ground_truth_center = self.device_state["ground_truth_center"][:2]
-        current_plunger_center = self._extract_voltage_centers(self.device_state["current_voltages"])
-        distance = np.linalg.norm(ground_truth_center - current_plunger_center)
-        
-        return distance < self.tolerance
 
     def _random_center(self):
         """
         Generate a random center for the voltage window.
         """
-        # Generate random center within the voltage range
-        measurement = self.qdarts_config['measurement']
-        x_range = measurement['voltage_range']['max'][0] - measurement['voltage_range']['min'][0]
-        y_range = measurement['voltage_range']['max'][1] - measurement['voltage_range']['min'][1]
+        # Generate plunger random center within the voltage range
+        env_config = self.env_config['env']
+        x_range = env_config['action_space']['plungers']['voltage_range'][1] - env_config['action_space']['plungers']['voltage_range'][0]
+        y_range = env_config['action_space']['plungers']['voltage_range'][1] - env_config['action_space']['plungers']['voltage_range'][0]
         
         center_x = np.random.uniform(
-            measurement['voltage_range']['min'][0] + x_range * 0.1,
-            measurement['voltage_range']['max'][0] - x_range * 0.1
+            env_config['action_space']['plungers']['voltage_range'][0] + x_range * 0.1,
+            env_config['action_space']['plungers']['voltage_range'][1] - x_range * 0.1
         )
         center_y = np.random.uniform(
-            measurement['voltage_range']['min'][1] + y_range * 0.1,
-            measurement['voltage_range']['max'][1] - y_range * 0.1
+            env_config['action_space']['plungers']['voltage_range'][0] + y_range * 0.1,
+            env_config['action_space']['plungers']['voltage_range'][1] - y_range * 0.1
+        )
+
+        # Generate barrier random center within the voltage range
+        barrier_range = env_config['action_space']['barriers']['voltage_range'][1] - env_config['action_space']['barriers']['voltage_range'][0]
+
+        center_1 = np.random.uniform(
+            env_config['action_space']['barriers']['voltage_range'][0] + barrier_range * 0.1,
+            env_config['action_space']['barriers']['voltage_range'][1] - barrier_range * 0.1
+        )
+
+        center_2 = np.random.uniform(
+            env_config['action_space']['barriers']['voltage_range'][0] + barrier_range * 0.1,
+            env_config['action_space']['barriers']['voltage_range'][1] - barrier_range * 0.1
+        )
+
+        center_3 = np.random.uniform(   
+            env_config['action_space']['barriers']['voltage_range'][0] + barrier_range * 0.1,
+            env_config['action_space']['barriers']['voltage_range'][1] - barrier_range * 0.1
         )
         
-        return np.array([center_x, center_y]) 
+        return np.array([center_x, center_y, center_1, center_2, center_3]) 
+    
 
     def reset(self, seed=None, options=None):
         """
@@ -657,46 +791,40 @@ class QDartsEnv(gym.Env):
 
         # --- Initialize episode-specific Model ---
         self.experiment = self._load_model()
+        
+        # Compute ground-truth center of target state's polytope (first two gates)
+        target_state = np.array(self.qdarts_config['device']['target_state'], dtype=int)
+        _gt_point = self.experiment.capacitance_sim.boundaries(target_state).point_inside
+        ground_truth_center = _gt_point[:2] if _gt_point is not None else np.zeros(2)
 
+        
         # Initialize episode-specific voltage state
         # Center of current window
-        center = self._random_center()
+        centers = self._random_center()
+        
 
-        # Create voltage grids centered around the random center
-        measurement = self.qdarts_config['measurement']
-        resolution = measurement['resolution']
+        #Ground truth barrier voltages
         
-        x_grid = np.linspace(
-            measurement['voltage_range']['min'][0], 
-            measurement['voltage_range']['max'][0], 
-            resolution
-        )
-        y_grid = np.linspace(
-            measurement['voltage_range']['min'][1], 
-            measurement['voltage_range']['max'][1], 
-            resolution
-        )
-        
-        X, Y = np.meshgrid(x_grid + center[0], y_grid + center[1])
-        
-        # Initialize voltage state
-        current_voltages = np.zeros((resolution, resolution, 6))  # 6 gates total
-        current_voltages[:,:,0] = X
-        current_voltages[:,:,1] = Y
+        # Compute ground truth barrier targets for cutoff tunnel coupling
+        barrier_config = self.experiment.barrier_config
+        targets_clamped, _, _, _ = self._compute_ground_truth_barrier_targets(barrier_config)
+        barrier_names = ['barrier_2', 'barrier_3', 'barrier_4']
+        ground_truth_barrier_voltages = np.array([targets_clamped[name] for name in barrier_names])
 
+                
         # Device state variables (episode-specific)
         self.device_state = {
             "experiment": self.experiment,
-            "current_voltages": current_voltages,
-            "ground_truth_center": center,
-            "current_barrier_voltages": np.zeros(3)
+            "current_plunger_voltages": centers[:2],
+            "current_barrier_voltages": centers[2:], 
+            "ground_truth_plungers": ground_truth_center,
+            "ground_truth_barrier_voltages": ground_truth_barrier_voltages,
+            "previous_distance": None, #updated each time you calculate reward, intialised two lines below this
         }
 
-        # Calculate max possible distance for reward normalization
-        self.max_possible_distance = np.sqrt(
-            (measurement['voltage_range']['max'][0] - measurement['voltage_range']['min'][0])**2 +
-            (measurement['voltage_range']['max'][1] - measurement['voltage_range']['min'][1])**2
-        )
+        #calculate the distance between the ground truth  voltages and the current voltages
+        self.device_state["previous_distance"] = self._get_distance()
+
 
         # --- Return the initial observation ---
         observation = self._get_obs() 
@@ -728,10 +856,9 @@ class QDartsEnv(gym.Env):
         observation = self._get_obs()
 
         # --- Calculate the reward ---
-        reward = self._get_reward()
+        reward, terminated = self._get_reward()
 
-        # --- Check if the episode has ended ---
-        terminated = self._is_at_target()
+        # --- Check if the episode has timed out ---
         truncated = self.current_step >= self.max_steps
 
         # --- Get additional information ---
@@ -761,56 +888,124 @@ class QDartsEnv(gym.Env):
                 "resolution": self.qdarts_config['measurement']['resolution'],
                 "num_dots": self.qdarts_config['device']['topology']['num_dots'],
                 "num_gates": self.qdarts_config['device']['topology']['num_gates']
+            },
+            "barrier_targets": {
+                "ground_truth_voltages": self.device_state.get("ground_truth_barrier_voltages", np.zeros(3)).tolist(),
             }
         } 
 
-    def render(self):
+    def render(self, title=None):
         """
         Render the environment.
         """
         if self.render_mode == "rgb_array":
             return self._render_frame()
         elif self.render_mode == "human":
-            self._render_frame()
+            self._render_frame(title)
             return None
 
-    def _render_frame(self, inference_plot=False):
+    def _render_frame(self, inference_plot=False, title=None):
         """
         Render a frame of the environment.
         """
         if self.z is None:
             return None
         
-        # Create figure
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        # Get the full measurement voltage range from the config
+        measurement = self.qdarts_config['measurement']
+        measurement_x_min, measurement_x_max = measurement['voltage_range']['min'][0], measurement['voltage_range']['max'][0]
+        measurement_y_min, measurement_y_max = measurement['voltage_range']['min'][1], measurement['voltage_range']['max'][1]
         
-        # Plot charge sensor data
-        im1 = axes[0].imshow(self.z[:, :, 0], cmap='viridis', aspect='auto')
-        axes[0].set_title('Charge Sensor Data')
-        axes[0].set_xlabel('Gate 1 Voltage')
-        axes[0].set_ylabel('Gate 2 Voltage')
+        # Get current plunger positions for the measurement window
+        current_plungers = self.device_state["current_plunger_voltages"]
+        voltage_grid = self._build_voltage_grid(current_plungers)
+        x_voltages, y_voltages, barrier_voltages = voltage_grid
+        
+        # Get the full plunger voltage range for the position plot
+        plunger_config = self.env_config['env']['action_space']['plungers']
+        full_x_min, full_x_max = plunger_config['voltage_range']
+        full_y_min, full_y_max = plunger_config['voltage_range']
+        
+        # Create figure with 3 subplots: CSD, voltage positions, and barrier info
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        
+        # Plot 1: Charge Sensor Data with FULL measurement voltage range
+        im1 = axes[0].imshow(self.z[:, :, 0], cmap='viridis', aspect='auto', 
+                             extent=[measurement_x_min, measurement_x_max, measurement_y_min, measurement_y_max], origin='lower')
+        axes[0].set_title('Charge Sensor Data (Full Measurement Range)')
+        axes[0].set_xlabel(f'Plunger 1 Voltage (V)\nRange: [{measurement_x_min:.3f}, {measurement_x_max:.3f}]')
+        axes[0].set_ylabel(f'Plunger 2 Voltage (V)\nRange: [{measurement_y_min:.3f}, {measurement_y_max:.3f}]')
         plt.colorbar(im1, ax=axes[0])
         
-        # Plot voltage centers
-        if 'current_voltages' in self.device_state:
-            current_voltages = self.device_state["current_voltages"]
-            plunger_centers = self._extract_voltage_centers(current_voltages)
-            ground_truth = self.device_state["ground_truth_center"]
+        # Plot 2: Voltage positions with FULL plunger voltage range
+        ground_truth_plungers = self.device_state["ground_truth_plungers"]
+        current_plungers = self.device_state["current_plunger_voltages"]
+        
+        axes[1].scatter(current_plungers[0], current_plungers[1], c='red', s=50)
+        axes[1].scatter(ground_truth_plungers[0], ground_truth_plungers[1], c='green', s=50)
+        axes[1].set_xlabel(f'Plunger 1 Voltage (V)\nFull Range: [{full_x_min:.3f}, {full_x_max:.3f}]')
+        axes[1].set_ylabel(f'Plunger 2 Voltage (V)\nFull Range: [{full_y_min:.3f}, {full_y_max:.3f}]')
+        axes[1].set_title('Voltage Positions (Full Range)')
+        axes[1].grid(True)
+        
+        # Set axis limits for the full plunger range
+        axes[1].set_xlim(full_x_min, full_x_max)
+        axes[1].set_ylim(full_y_min, full_y_max)
+        
+        # Add a rectangle showing the current measurement window
+        from matplotlib.patches import Rectangle
+        current_x_min, current_x_max = x_voltages.min(), x_voltages.max()
+        current_y_min, current_y_max = y_voltages.min(), y_voltages.max()
+        rect = Rectangle((current_x_min, current_y_min), current_x_max - current_x_min, current_y_max - current_y_min, 
+                        linewidth=2, edgecolor='blue', facecolor='none', alpha=0.7, linestyle='--')
+        axes[1].add_patch(rect)
+
+
+        # Plot 3: Barrier voltage information
+        current_barriers = self.device_state["current_barrier_voltages"]
+        ground_truth_barriers = self.device_state["ground_truth_barrier_voltages"]
+        
+        # Create barrier voltage display
+        barrier_names = ['Barrier 2', 'Barrier 3', 'Barrier 4']
+        barrier_text = "Barrier Voltages:\n\n"
+        
+        for i, (name, current, target) in enumerate(zip(barrier_names, current_barriers, ground_truth_barriers)):
+            # Color code based on how close to target
+            distance = abs(current - target)
+            if distance < 0.1:
+                color = 'green'
+            elif distance < 0.3:
+                color = 'orange'
+            else:
+                color = 'red'
             
-            axes[1].scatter(plunger_centers[0], plunger_centers[1], c='red', s=100, label='Current Position')
-            axes[1].scatter(ground_truth[0], ground_truth[1], c='green', s=100, label='Target Position')
-            axes[1].set_xlabel('Gate 1 Voltage')
-            axes[1].set_ylabel('Gate 2 Voltage')
-            axes[1].set_title('Voltage Positions')
-            axes[1].legend()
-            axes[1].grid(True)
+            barrier_text += f"{name}:\n"
+            barrier_text += f"  Current: {current:.3f}V\n"
+            barrier_text += f"  Target:  {target:.3f}V\n"
+            barrier_text += f"  Diff:    {current - target:+.3f}V\n\n"
+        
+        # Add plunger information
+        plunger_distance = np.linalg.norm(ground_truth_plungers - current_plungers)
+        barrier_text += f"Plunger Distance to Target:\n{plunger_distance:.3f}V\n\n"
+        barrier_text += f"Step: {self.current_step}/{self.max_steps}"
+        
+        # Display barrier info as text
+        axes[2].text(0.1, 0.9, barrier_text, transform=axes[2].transAxes, 
+                     fontsize=10, verticalalignment='top', fontfamily='monospace',
+                     bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+        axes[2].set_title('Device State')
+        axes[2].set_xlim(0, 1)
+        axes[2].set_ylim(0, 1)
+        axes[2].axis('off')  # Hide axis for text display
         
         plt.tight_layout()
         
         # Convert to RGB array
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-        plt.savefig('test.png', format='png', dpi=100, bbox_inches='tight')
+
+        if self.render_mode == "human":
+            plt.savefig(f'{title}.png', format='png', dpi=100, bbox_inches='tight')
 
         buf.seek(0)
         img_array = plt.imread(buf)
@@ -818,14 +1013,7 @@ class QDartsEnv(gym.Env):
         
         return img_array
 
-    def close(self):
-        """
-        Clean up resources.
-        """
-        if hasattr(self, 'experiment') and self.experiment is not None:
-            # Clean up QDARTS experiment if needed
-            pass
-
+ 
     def get_raw_observation(self):
         """
         Get raw (unnormalized) observation data for debugging purposes.
@@ -849,5 +1037,11 @@ class QDartsEnv(gym.Env):
 if __name__ == "__main__":
     env = QDartsEnv()
     env.reset()
-    env.render()
-    env.close()
+    env.render(title="initial")
+
+    #test setting action to ground truth plunger and barrier voltages
+    ground_truth_plungers = env.device_state["ground_truth_plungers"]
+    ground_truth_barriers = env.device_state["ground_truth_barrier_voltages"]
+    action = np.concatenate([ground_truth_plungers, ground_truth_barriers])
+    env.step(action)
+    env.render(title="ground_truth")
