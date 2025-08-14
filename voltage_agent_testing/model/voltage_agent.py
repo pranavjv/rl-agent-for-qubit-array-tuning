@@ -8,6 +8,7 @@ ModuleType = Optional[Type[nn.Module]]
 from base_classes import MLP, CNN
 from rssm import RecurrentModel
 
+
 class Actor(nn.Module):
     """
     actor class for generating actions conditioned on the latent space and the recurrent state
@@ -56,15 +57,17 @@ class Agent(nn.Module):
     """
     def __init__(
         self,
+        input_channels: int,
         image_size: int = 128,
         latent_dim: int = 256,
         action_dim: int = 1,
         recurrent_dim: int = 128,
         feature_dim: int = 256,
         cnn_hidden_dims: Sequence[int] = [16, 32, 64, 64],
-        actor_hidden_dims: Sequence[int] = [32, 64, 128],
+        actor_hidden_dims: Sequence[int] = [128, 128, 64, 32],
     ) -> None:
         super().__init__()
+        print('-'*40)
 
         self.actor = Actor(
             feature_dim=feature_dim,
@@ -73,9 +76,10 @@ class Agent(nn.Module):
             hidden_dims=actor_hidden_dims,
             latent_dim=latent_dim,
         )
+        print(f'Initialised actor with {sum(p.numel() for p in self.actor.parameters())} parameters')
 
         self.feature_extractor = CNN(
-            input_channels=2,
+            input_channels=input_channels,
             hidden_channels=cnn_hidden_dims,
             kernel_sizes=[4, 4, 4, 4],
             strides=[4, 2, 2, 2],
@@ -86,37 +90,54 @@ class Agent(nn.Module):
             norm_layer=nn.BatchNorm2d,
             norm_args=None
         )
+        print(f'Initialised feature extractor with {sum(p.numel() for p in self.feature_extractor.parameters())} parameters')
 
         self.quality_head = MLP(
             input_dim=feature_dim,
             hidden_dims=[128, 64, 64],
             output_dim=1
         )
+        print(f'Initialised quality head with {sum(p.numel() for p in self.quality_head.parameters())} parameters')
 
         self.rssm = RecurrentModel(
             input_dim=latent_dim,
             hidden_dim=recurrent_dim,
         )
+        print(f'Initialised RSSM with {sum(p.numel() for p in self.rssm.parameters())} parameters')
 
-        self.recurrent_state = torch.zeros(recurrent_dim, dtype=torch.float32)
+        self.recurrent_state = torch.zeros(recurrent_dim, dtype=torch.float32).unsqueeze(0)
 
-    def predict_action(self, obs: torch.Tensor) -> torch.Tensor:
+        print(f'Agent initialised with {sum(p.numel() for p in self.parameters())} parameters')
+        print('-'*40)
+
+
+    def predict_action(self, obs: torch.Tensor, update_recurrent: bool = True) -> torch.Tensor:
         feats = self.encode_image(obs)
+        if update_recurrent:
+            self.recurrent_state = self.rssm(self.recurrent_state, feats)
+        action, _ = self.actor(feats, self.recurrent_state)
+        return action
 
     def encode_image(self, obs: torch.Tensor) -> torch.Tensor:
         return self.feature_extractor(obs)
 
     def get_quality(self, obs: torch.Tensor) -> torch.Tensor:
         feats = self.encode_image(obs)
-        return self.quality_head(feats)
+        logits = self.quality_head(feats)
+        return torch.sigmoid(logits)
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, update_recurrent: bool = True) -> torch.Tensor:
         feats = self.encode_image(obs)
-        self.recurrent_state = self.rssm(self.recurrent_state, feats)
-        quality, quality_logits = self.quality_head(feats)
-        action = self.actor(feats, self.recurrent_state)
-        return action, quality, quality_logits
+        if update_recurrent:
+            self.recurrent_state = self.rssm(self.recurrent_state, feats)
+        quality_logits = self.quality_head(feats)
+        action, dist = self.actor(feats, self.recurrent_state)
+        return action, quality_logits
 
 
 if __name__ == '__main__':
-    agent = Agent()
+    agent = Agent(input_channels=2)
+    x = torch.randn(1, 2, 128, 128)
+    action, quality_logits = agent(x)
+    print(action.shape)
+    print(quality_logits.shape)

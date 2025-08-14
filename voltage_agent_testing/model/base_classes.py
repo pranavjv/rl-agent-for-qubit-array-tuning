@@ -28,7 +28,6 @@ class MLP(nn.Module):
             output_dim=output_dim,
             activation=activation,
         )
-        self.sigmoid = nn.Sigmoid()
     
     def _build_net(
         self,
@@ -49,7 +48,7 @@ class MLP(nn.Module):
 
     def forward(self, latent: torch.Tensor) -> torch.Tensor:
         logits = self.net(latent)
-        return self.sigmoid(logits), logits
+        return logits
 
 
 class CNN(nn.Module):
