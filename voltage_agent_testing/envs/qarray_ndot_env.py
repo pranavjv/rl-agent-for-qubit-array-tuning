@@ -59,8 +59,10 @@ class QuantumDeviceEnv(QarrayBaseClass):
             model_mats.append(out_mat)
 
         Cdd, Cgd = model_mats
-        Cds = [np.array(Cds_base).flatten().tolist() * (self.num_dots // 4)]
-        Cgs = [np.array(Cgs_base).flatten().tolist() * (self.num_dots // 4)]
+        Cds = Cds_base
+        Cgs = Cgs_base
+
+        print(np.array(Cds).shape)
 
         # print(np.array(Cdd).shape)
         # print(np.array(Cgd).shape)

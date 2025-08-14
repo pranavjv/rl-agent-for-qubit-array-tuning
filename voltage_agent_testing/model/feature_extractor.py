@@ -10,13 +10,17 @@ from utils import create_layers, miniblock
 
 
 class CNNFeatureExtractor(nn.Module):
+    """
+    CNN feature extractor from an image to a latent vector
+    on 2x128x128 size it returns a 256-d vector
+    """
     def __init__(
         self,
         input_channels: int,
         hidden_channels: Sequence[int],
         kernel_sizes: Sequence[int],
-        paddings: Sequence[int],
-        strides: Sequence[int],
+        paddings: Optional[Sequence[int]] = None,
+        strides: Optional[Sequence[int]] = None,
         cnn_layer: ModuleType = nn.Conv2d,
         dropout_layer: Optional[ModuleType] = None,
         dropout_p: Optional[float] = None,
@@ -26,7 +30,7 @@ class CNNFeatureExtractor(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.cnn = self.build_cnn(
+        self.cnn = self._build_cnn(
             input_channels=input_channels,
             hidden_channels=hidden_channels,
             kernel_sizes=kernel_sizes,
@@ -40,8 +44,7 @@ class CNNFeatureExtractor(nn.Module):
             norm_args=norm_args,
         )
 
-    
-    def build_cnn(
+    def _build_cnn(
         self,
         input_channels,
         hidden_channels,
@@ -54,7 +57,7 @@ class CNNFeatureExtractor(nn.Module):
         activation,
         norm_layer,
         norm_args,
-    ) -> None:
+    ) -> ModuleType:
         num_layers = len(hidden_channels)
         assert len(kernel_sizes) == num_layers
 
@@ -70,8 +73,8 @@ class CNNFeatureExtractor(nn.Module):
             hidden_sizes[:-1],
             hidden_sizes[1:],
             kernel_sizes,
-            paddings,
-            strides,
+            paddings if paddings is not None else [0]*num_layers,
+            strides if strides is not None else [1]*num_layers,
             layer_args_list,
             dropout_layers,
             dropout_args,
@@ -93,18 +96,16 @@ class CNNFeatureExtractor(nn.Module):
         self._output_dim = hidden_sizes[-1]
         return nn.Sequential(*model)
 
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.cnn(x)
+        return self.cnn(x).reshape(x.size(0), -1)
 
 
 if __name__ == '__main__':
     cnn_feature_extractor = CNNFeatureExtractor(
         input_channels=2,
-        hidden_channels=[16, 32, 64],
-        kernel_sizes=[4, 4, 4],
-        paddings=[0, 0, 1],
-        strides=[2, 2, 2],
+        hidden_channels=[16, 32, 64, 64],
+        kernel_sizes=[4, 4, 4, 4],
+        strides=[4, 2, 2, 2],
         cnn_layer=nn.Conv2d,
         dropout_layer=nn.Dropout,
         dropout_p=0.1,
@@ -113,6 +114,6 @@ if __name__ == '__main__':
         norm_args=None
     )
 
-    x = torch.randn(1, 2, 224, 224)
+    x = torch.randn(1, 2, 128, 128)
     out = cnn_feature_extractor(x)
     print(out.shape)
