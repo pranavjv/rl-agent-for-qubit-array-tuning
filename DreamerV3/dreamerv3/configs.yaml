@@ -57,7 +57,7 @@ defaults:
     eval_envs: 4
     eval_eps: 1
     report_batches: 1
-    from_checkpoint: ''
+    from_checkpoint: '/home/rahul/logdir/20250812T154958/ckpt/latest'
     episode_timeout: 180
     actor_addr: 'localhost:{auto}'
     replay_addr: 'localhost:{auto}'
@@ -73,8 +73,8 @@ defaults:
   jax:
     platform: cuda
     compute_dtype: bfloat16
-    policy_devices: [0]
-    train_devices: [0]
+    policy_devices: [2]
+    train_devices: [2]
     mock_devices: 0
     prealloc: True
     jit: True

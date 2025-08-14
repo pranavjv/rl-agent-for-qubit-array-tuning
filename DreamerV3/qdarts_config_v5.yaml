@@ -24,7 +24,7 @@ simulator:
     C_DG:
       - [0.75, 0.1, 0, 0, 0, 0.02]  # Dot 0 to gates 0,1,2,3,4,5
       - [0.1, 0.75, 0, 0, 0, 0.02]  # Dot 1 to gates 0,1,2,3,4,5  
-      - [0, 0, 0, 0, 0, 1.0]        # Dot 2 (sensor) to gates 0,1,2,3,4,5
+      - [0,      0, 0, 0, 0,  1.0]        # Dot 2 (sensor) to gates 0,1,2,3,4,5
     
     # Minimum voltage bounds for each gate
     bounds_limits: -2.0
@@ -52,7 +52,7 @@ simulator:
       barrier_2:
         coupling_type: "reservoir_to_dot"
         target_dot: 0
-        base_coupling: 30e-4
+        base_coupling: 30e-6
         alpha: 2.0  # Stronger voltage dependence for reservoir coupling
         voltage_offset: 0.0
         
@@ -60,7 +60,7 @@ simulator:
       barrier_3:
         coupling_type: "dot_to_dot"
         target_dots: [0, 1]
-        base_coupling: 30e-4
+        base_coupling: 30e-6
         alpha: 1.5  # Moderate voltage dependence for dot-dot coupling
         voltage_offset: 0.0
         
@@ -68,7 +68,7 @@ simulator:
       barrier_4:
         coupling_type: "dot_to_reservoir"
         target_dot: 1
-        base_coupling: 30e-4
+        base_coupling: 30e-6
         alpha: 2.0  # Same as barrier_2 (both reservoir couplings)
         voltage_offset: 0.0
     
@@ -81,7 +81,7 @@ simulator:
   sensor:
     sensor_dot_indices: [2]
     sensor_gate_indices: [5]
-    sensor_detunings: [0.0005]  # meV
+    sensor_detunings: [5]  # meV
     noise_amplitude:
       fast_noise: 1e-4
       slow_noise: 1e-5

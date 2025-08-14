@@ -37,8 +37,6 @@ class Experiment(): #TODO: change name to the simulator name
         self.barrier_config = barrier_config
         self.print_logs = print_logs
 
-        print("EXPERIMENT WITH BARRIERS INITIALIZED")
-        print("-------------------------------------")
 
         # Deploy simulators
         self.capacitance_sim = self.deploy_capacitance_sim(capacitance_config)
@@ -74,11 +72,15 @@ class Experiment(): #TODO: change name to the simulator name
         # Handle both C_Dg (Experiment format) and C_DG (full matrix format)
         if "C_Dg" in config:
             # Original Experiment format - use as is
-            capacitance_model = ModelWithBarriers(config["C_Dg"], config["C_DD"], -1, ks= config["ks"])
+            C_Dg = np.array(config["C_Dg"], dtype=np.float64)
+            C_DD = np.array(config["C_DD"], dtype=np.float64)
+            capacitance_model = ModelWithBarriers(C_Dg, C_DD, -1, ks= config["ks"])
             self.N = len(config["C_Dg"])  # number of dots
         elif "C_DG" in config:
             # Full capacitance matrix format - use full matrix
-            capacitance_model = ModelWithBarriers(config["C_DG"], config["C_DD"], -1, ks= config["ks"])
+            C_DG = np.array(config["C_DG"], dtype=np.float64)
+            C_DD = np.array(config["C_DD"], dtype=np.float64)
+            capacitance_model = ModelWithBarriers(C_DG, C_DD, -1, ks= config["ks"])
             self.N = len(config["C_DG"][0])  # number of gates (not dots)
         else:
             raise ValueError("Capacitance config must contain either 'C_Dg' or 'C_DG'")
@@ -131,7 +133,7 @@ class Experiment(): #TODO: change name to the simulator name
         Returns:
         tunneling_sim: ApproximateTunnelingSimulator object
         '''
-        tunneling_matrix = tunneling_config["tunnel_couplings"]
+        tunneling_matrix = np.array(tunneling_config["tunnel_couplings"], dtype=np.float64)
         if np.max(tunneling_matrix)==0:
             tunneling_matrix = tunneling_matrix + 1e-20
         tunneling_sim = ApproximateTunnelingSimulator(capacitance_sim, 
