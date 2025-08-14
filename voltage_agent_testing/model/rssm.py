@@ -9,13 +9,13 @@ class RecurrentModel(nn.Module):
     """
     def __init__(
         self,
-        input_size: int,
-        hidden_size: int,
+        input_dim: int,
+        hidden_dim: int,
     ) -> None:
         super().__init__()
-        
-        self.linear = nn.Linear(input_size + hidden_size, 3 * hidden_size)
-        self.ln = nn.LayerNorm(3 * hidden_size)
+
+        self.linear = nn.Linear(input_dim + hidden_dim, 3 * hidden_dim)
+        self.ln = nn.LayerNorm(3 * hidden_dim)
 
     def forward(self, recurrent_state: torch.Tensor, latent: torch.Tensor) -> torch.Tensor:
         """

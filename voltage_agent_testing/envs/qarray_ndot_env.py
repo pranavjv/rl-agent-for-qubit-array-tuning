@@ -205,7 +205,7 @@ class QuantumDeviceEnv(QarrayBaseClass):
 
 if __name__ == "__main__":
     import sys
-    env = QuantumDeviceEnv(ndots=12)
+    env = QuantumDeviceEnv(ndots=4)
     obs, _ = env.reset()
     print(obs['image'].shape)
     sys.exit(0)

@@ -9,7 +9,50 @@ ModuleType = Optional[Type[nn.Module]]
 from utils import create_layers, miniblock
 
 
-class CNNFeatureExtractor(nn.Module):
+class MLP(nn.Module):
+    """
+    MLP for quality score and actor
+    """
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: Sequence[int],
+        output_dim: int,
+        activation: nn.Module = nn.ReLU,
+    ) -> None:
+        super().__init__()
+
+        self.net = self._build_net(
+            input_dim=input_dim,
+            hidden_dims=hidden_dims,
+            output_dim=output_dim,
+            activation=activation,
+        )
+        self.sigmoid = nn.Sigmoid()
+    
+    def _build_net(
+        self,
+        input_dim,
+        hidden_dims,
+        output_dim,
+        activation,
+    ) -> nn.Module:
+        layers = []
+        in_dim = input_dim
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(in_dim, hidden_dim))
+            layers.append(activation())
+            in_dim = hidden_dim
+        
+        layers.append(nn.Linear(in_dim, output_dim))
+        return nn.Sequential(*layers)
+
+    def forward(self, latent: torch.Tensor) -> torch.Tensor:
+        logits = self.net(latent)
+        return self.sigmoid(logits), logits
+
+
+class CNN(nn.Module):
     """
     CNN feature extractor from an image to a latent vector
     on 2x128x128 size it returns a 256-d vector
@@ -57,7 +100,7 @@ class CNNFeatureExtractor(nn.Module):
         activation,
         norm_layer,
         norm_args,
-    ) -> ModuleType:
+    ) -> nn.Module:
         num_layers = len(hidden_channels)
         assert len(kernel_sizes) == num_layers
 
@@ -101,7 +144,7 @@ class CNNFeatureExtractor(nn.Module):
 
 
 if __name__ == '__main__':
-    cnn_feature_extractor = CNNFeatureExtractor(
+    cnn_feature_extractor = CNN(
         input_channels=2,
         hidden_channels=[16, 32, 64, 64],
         kernel_sizes=[4, 4, 4, 4],
