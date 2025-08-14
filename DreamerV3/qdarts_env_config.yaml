@@ -70,7 +70,7 @@ measurement:
   voltage_range:
     min: [-0.2, -0.2]
     max: [0.2, 0.2]
-  resolution: 250
+  resolution: 128
   sweep_matrix:
     - [1, 0]
     - [0, 1]
@@ -100,5 +100,5 @@ env:
 # Training Configuration
 training:
   seed: 42
-  debug: true
+  debug: false
   render_mode: "human" 

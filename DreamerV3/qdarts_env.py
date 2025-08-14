@@ -665,7 +665,10 @@ class QDartsEnv(gym.Env):
             action: np.ndarray(5,) containing [plunger1, plunger2, barrier1, barrier2, barrier3]
         """
         # Split action into plungers and barriers
-        plungers = action[:2]  # First 2 elements
+        plungers = action[:2]  # First 2 elements   
+        if self.debug:
+            print(f"plungers: {plungers}")
+            
         barriers = action[2:]  # Last 3 elements
 
         self.device_state["current_plunger_voltages"] = plungers
@@ -1057,5 +1060,5 @@ if __name__ == "__main__":
     ground_truths = get_ground_truths(env)
     print(f"Ground truths: {ground_truths}")
     action = ground_truths
-    env.step(action*2)
+    env.step(action)
     env.render(title="ground_truth")
