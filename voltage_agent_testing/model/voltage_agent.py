@@ -5,8 +5,8 @@ import numpy as np
 from typing import Optional, Sequence, Type, Dict
 ModuleType = Optional[Type[nn.Module]]
 
-from base_classes import MLP, CNN
-from rssm import RecurrentModel
+from model.base_classes import MLP, CNN
+from model.rssm import RecurrentModel
 
 
 class Actor(nn.Module):

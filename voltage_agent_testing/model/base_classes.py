@@ -6,7 +6,7 @@ import numpy as np
 from typing import Optional, Sequence, Type, Dict
 ModuleType = Optional[Type[nn.Module]]
 
-from utils import create_layers, miniblock
+from model.utils import create_layers, miniblock
 
 
 class MLP(nn.Module):

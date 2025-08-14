@@ -13,7 +13,7 @@ import io
 import fcntl
 import json
 
-from utils import sigmoid
+from envs.utils import sigmoid
 
 """
 Qarray base class with full randomisation

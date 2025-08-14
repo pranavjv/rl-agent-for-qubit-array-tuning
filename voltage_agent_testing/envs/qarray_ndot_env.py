@@ -4,7 +4,7 @@ import numpy as np
 import yaml
 import os
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
-from qarray_base_class import QarrayBaseClass
+from envs.qarray_base_class import QarrayBaseClass
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
@@ -61,8 +61,6 @@ class QuantumDeviceEnv(QarrayBaseClass):
         Cdd, Cgd = model_mats
         Cds = Cds_base
         Cgs = Cgs_base
-
-        print(np.array(Cds).shape)
 
         # print(np.array(Cdd).shape)
         # print(np.array(Cgd).shape)
