@@ -15,9 +15,10 @@ def main():
         agent_kwargs={
             'input_channels': 1, 
             'action_dim': 2, 
-            'num_input_voltages': 2
+            'num_input_voltages': 2,
         },
         n_steps=128,
+        batch_size=64,
     )
     
     print('Training ...')

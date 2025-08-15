@@ -11,10 +11,10 @@ from tqdm import tqdm
 
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy, BasePolicy, MultiInputActorCriticPolicy
+from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.type_aliases import GymEnv, Schedule, PyTorchObs
 from stable_baselines3.common.utils import FloatSchedule, explained_variance, obs_as_tensor
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, MlpExtractor
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.distributions import make_proba_distribution, Distribution
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import VecEnv
@@ -185,14 +185,6 @@ class CustomAgentPolicy(BasePolicy):
 
 
 class PPO(OnPolicyAlgorithm):
-    
-    policy_aliases = {
-        "MlpPolicy": ActorCriticPolicy,
-        "CnnPolicy": ActorCriticCnnPolicy,
-        "MultiInputPolicy": MultiInputActorCriticPolicy,
-        "CustomAgentPolicy": CustomAgentPolicy,
-    }
-
     def __init__(
         self,
         policy: Union[str, type[ActorCriticPolicy]],
@@ -271,7 +263,6 @@ class PPO(OnPolicyAlgorithm):
         """
         assert self._last_obs is not None, "No previous observation was provided"
         
-        # Switch to eval mode (this affects batch norm / dropout)
         self.policy.set_training_mode(False)
 
         n_steps = 0
@@ -283,14 +274,13 @@ class PPO(OnPolicyAlgorithm):
 
         callback.on_rollout_start()
 
-        # Add progress bar for rollout collection
         with tqdm(total=n_rollout_steps, desc="Collecting Rollouts") as pbar:
             while n_steps < n_rollout_steps:
                 if self.use_sde and self.sde_sample_freq > 0 and n_steps % self.sde_sample_freq == 0:
                     # Sample a new noise matrix
                     self.policy.reset_noise(env.num_envs)
 
-                with th.no_grad():
+                with torch.no_grad():
                     # Convert to pytorch tensor
                     obs_tensor = obs_as_tensor(self._last_obs, self.device)
                     actions, values, log_probs = self.policy(obs_tensor)
