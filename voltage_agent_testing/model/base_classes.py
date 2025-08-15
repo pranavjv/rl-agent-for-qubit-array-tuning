@@ -6,7 +6,10 @@ import numpy as np
 from typing import Optional, Sequence, Type, Dict
 ModuleType = Optional[Type[nn.Module]]
 
-from model.utils import create_layers, miniblock
+try:
+    from model.utils import create_layers, miniblock
+except ModuleNotFoundError:
+    from utils import create_layers, miniblock
 
 
 class MLP(nn.Module):
@@ -58,6 +61,8 @@ class CNN(nn.Module):
     """
     def __init__(
         self,
+        img_size: int,
+        feature_dim: int,
         input_channels: int,
         hidden_channels: Sequence[int],
         kernel_sizes: Sequence[int],
@@ -85,6 +90,12 @@ class CNN(nn.Module):
             norm_layer=norm_layer,
             norm_args=norm_args,
         )
+
+        with torch.no_grad():
+            x = torch.randn(1, input_channels, img_size, img_size)
+            out_dim = self.cnn(x).view(1, -1).size(-1)
+
+        self.linear = nn.Linear(out_dim, feature_dim)
 
     def _build_cnn(
         self,
@@ -139,7 +150,7 @@ class CNN(nn.Module):
         return nn.Sequential(*model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.cnn(x).reshape(x.size(0), -1)
+        return self.linear(self.cnn(x).reshape(x.size(0), -1))
 
 
 if __name__ == '__main__':

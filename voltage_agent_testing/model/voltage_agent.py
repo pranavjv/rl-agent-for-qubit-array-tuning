@@ -5,9 +5,12 @@ import numpy as np
 from typing import Optional, Sequence, Type, Dict
 ModuleType = Optional[Type[nn.Module]]
 
-from model.base_classes import MLP, CNN
-from model.rssm import RecurrentModel
-
+try:
+    from model.base_classes import MLP, CNN
+    from model.rssm import RecurrentModel
+except ModuleNotFoundError:
+    from base_classes import MLP, CNN
+    from rssm import RecurrentModel
 
 class Actor(nn.Module):
     """
@@ -59,10 +62,10 @@ class Agent(nn.Module):
         self,
         input_channels: int,
         image_size: int = 128,
-        latent_dim: int = 256,
+        actor_latent_dim: int = 512,
         action_dim: int = 1,
-        recurrent_dim: int = 128,
-        feature_dim: int = 256,
+        recurrent_dim: int = 512,
+        feature_dim: int = 512,
         cnn_hidden_dims: Sequence[int] = [16, 32, 64, 64],
         actor_hidden_dims: Sequence[int] = [128, 128, 64, 32],
     ) -> None:
@@ -74,11 +77,13 @@ class Agent(nn.Module):
             action_dim=action_dim,
             recurrent_dim=recurrent_dim,
             hidden_dims=actor_hidden_dims,
-            latent_dim=latent_dim,
+            latent_dim=actor_latent_dim,
         )
         print(f'Initialised actor with {sum(p.numel() for p in self.actor.parameters())} parameters')
 
         self.feature_extractor = CNN(
+            img_size=image_size,
+            feature_dim=feature_dim,
             input_channels=input_channels,
             hidden_channels=cnn_hidden_dims,
             kernel_sizes=[4, 4, 4, 4],
@@ -100,7 +105,7 @@ class Agent(nn.Module):
         print(f'Initialised quality head with {sum(p.numel() for p in self.quality_head.parameters())} parameters')
 
         self.rssm = RecurrentModel(
-            input_dim=latent_dim,
+            input_dim=feature_dim,
             hidden_dim=recurrent_dim,
         )
         print(f'Initialised RSSM with {sum(p.numel() for p in self.rssm.parameters())} parameters')
