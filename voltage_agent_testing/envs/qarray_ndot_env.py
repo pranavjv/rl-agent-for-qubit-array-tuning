@@ -1,3 +1,7 @@
+"""
+Defines the main class for running n dots
+"""
+
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -14,10 +18,6 @@ import matplotlib.pyplot as plt
 import io
 import fcntl
 import json
-
-"""
-Defines the main class for running n dots
-"""
 
 class QuantumDeviceEnv(QarrayBaseClass):
     """

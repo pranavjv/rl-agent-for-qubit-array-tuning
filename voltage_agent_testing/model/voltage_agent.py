@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from typing import Optional, Sequence, Type, Dict
+from typing import Optional, Sequence, Type, Dict, Tuple
 ModuleType = Optional[Type[nn.Module]]
 
 try:
@@ -11,6 +11,7 @@ try:
 except ModuleNotFoundError:
     from base_classes import MLP, CNN
     from rssm import RecurrentModel
+
 
 class Actor(nn.Module):
     """
@@ -51,7 +52,8 @@ class Actor(nn.Module):
             action = mean
         else:
             action = dist.rsample()
-        return action, dist
+        logprob = dist.log_prob(action).sum(dim=-1, keepdim=True) 
+        return action, dist, logprob
 
 
 class Agent(nn.Module):
@@ -60,17 +62,25 @@ class Agent(nn.Module):
     """
     def __init__(
         self,
+        device: torch.device,
         input_channels: int,
-        image_size: int = 128,
-        actor_latent_dim: int = 512,
         action_dim: int = 1,
-        recurrent_dim: int = 512,
-        feature_dim: int = 512,
+        image_size: int = 128,
+        image_feature_dim: int = 512,
+        num_input_voltages: int = 1,
+        voltage_feature_dim: int = 32,
+        actor_latent_dim: int = 512,
+        recurrent_dim: int = 1024,
         cnn_hidden_dims: Sequence[int] = [16, 32, 64, 64],
         actor_hidden_dims: Sequence[int] = [128, 128, 64, 32],
+        print_size: bool = False,
     ) -> None:
         super().__init__()
-        print('-'*40)
+        if print_size:
+            print('-'*40)
+
+        feature_dim = image_feature_dim + voltage_feature_dim
+        self.feature_dim = feature_dim
 
         self.actor = Actor(
             feature_dim=feature_dim,
@@ -79,11 +89,12 @@ class Agent(nn.Module):
             hidden_dims=actor_hidden_dims,
             latent_dim=actor_latent_dim,
         )
-        print(f'Initialised actor with {sum(p.numel() for p in self.actor.parameters())} parameters')
+        if print_size:
+            print(f'Initialised actor with {sum(p.numel() for p in self.actor.parameters())} parameters')
 
-        self.feature_extractor = CNN(
+        self.image_feature_extractor = CNN(
             img_size=image_size,
-            feature_dim=feature_dim,
+            feature_dim=image_feature_dim,
             input_channels=input_channels,
             hidden_channels=cnn_hidden_dims,
             kernel_sizes=[4, 4, 4, 4],
@@ -95,53 +106,78 @@ class Agent(nn.Module):
             norm_layer=nn.BatchNorm2d,
             norm_args=None
         )
-        print(f'Initialised feature extractor with {sum(p.numel() for p in self.feature_extractor.parameters())} parameters')
+
+        self.voltage_feature_extractor = MLP(
+            input_dim=num_input_voltages,
+            hidden_dims=[32, 64],
+            output_dim=voltage_feature_dim
+        )
+        if print_size:
+            print(f'Initialised feature extractor with {sum(p.numel() for p in self.image_feature_extractor.parameters()) + sum(p.numel() for p in self.voltage_feature_extractor.parameters())} parameters')
 
         self.quality_head = MLP(
             input_dim=feature_dim,
             hidden_dims=[128, 64, 64],
             output_dim=1
-        )
-        print(f'Initialised quality head with {sum(p.numel() for p in self.quality_head.parameters())} parameters')
+        ) # for predicting when the agent has reached the goal
+        self.critic = MLP(
+            input_dim=feature_dim,
+            hidden_dims=[128, 64, 64],
+            output_dim=1
+        ) # for predicting expected rewards (or whatever our value function is)
+        if print_size:
+            print(f'Initialised critic/quality head with {sum(p.numel() for p in self.quality_head.parameters())} parameters')
 
         self.rssm = RecurrentModel(
             input_dim=feature_dim,
             hidden_dim=recurrent_dim,
         )
-        print(f'Initialised RSSM with {sum(p.numel() for p in self.rssm.parameters())} parameters')
+        if print_size:
+            print(f'Initialised RSSM with {sum(p.numel() for p in self.rssm.parameters())} parameters')
 
-        self.recurrent_state = torch.zeros(recurrent_dim, dtype=torch.float32).unsqueeze(0)
+        self.recurrent_state = torch.zeros(recurrent_dim, dtype=torch.float32).unsqueeze(0).to(device)
 
-        print(f'Agent initialised with {sum(p.numel() for p in self.parameters())} parameters')
-        print('-'*40)
+        if print_size:
+            print(f'Agent initialised with {sum(p.numel() for p in self.parameters())} parameters')
+            print('-'*40)
+        
+        self.to(device)
 
 
-    def predict_action(self, obs: torch.Tensor, update_recurrent: bool = True) -> torch.Tensor:
-        feats = self.encode_image(obs)
+    def encode_obs(self, image: torch.Tensor, voltages: torch.Tensor) -> torch.Tensor:
+        img_feats = self.image_feature_extractor(image)
+        voltage_feats = self.voltage_feature_extractor(voltages)
+        return torch.cat([img_feats, voltage_feats], dim=-1)
+
+    def predict_action(self, feats: torch.Tensor, update_recurrent: bool = True) -> torch.Tensor:
         if update_recurrent:
             self.recurrent_state = self.rssm(self.recurrent_state, feats)
-        action, _ = self.actor(feats, self.recurrent_state)
+        action, _, _ = self.actor(feats, self.recurrent_state)
         return action
 
-    def encode_image(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.feature_extractor(obs)
-
-    def get_quality(self, obs: torch.Tensor) -> torch.Tensor:
-        feats = self.encode_image(obs)
+    def get_quality(self, feats: torch.Tensor) -> torch.Tensor:
         logits = self.quality_head(feats)
-        return torch.sigmoid(logits)
+        return torch.softmax(logits)
 
-    def forward(self, obs: torch.Tensor, update_recurrent: bool = True) -> torch.Tensor:
-        feats = self.encode_image(obs)
+    def forward_step(self, feats: torch.Tensor, update_recurrent: bool = True) -> Tuple[torch.Tensor]:
         if update_recurrent:
             self.recurrent_state = self.rssm(self.recurrent_state, feats)
         quality_logits = self.quality_head(feats)
-        action, dist = self.actor(feats, self.recurrent_state)
-        return action, quality_logits
+        value = self.critic(feats)
+        action, dist, logprob = self.actor(feats, self.recurrent_state)
+        return action, dist, logprob, quality_logits, value
+
+    def forward(self, image: torch.Tensor, voltages: torch.Tensor, update_recurrent: bool = True) -> Tuple[torch.Tensor]:
+        feats = self.encode_obs(image, voltages)
+        if update_recurrent:
+            self.recurrent_state = self.rssm(self.recurrent_state, feats)
+        quality_logits = self.quality_head(feats)
+        action, dist, logprob = self.actor(feats, self.recurrent_state)
+        return action, logprob, quality_logits
 
 
 if __name__ == '__main__':
-    agent = Agent(input_channels=2)
+    agent = Agent(input_channels=2, print_size=True)
     x = torch.randn(1, 2, 128, 128)
     action, quality_logits = agent(x)
     print(action.shape)
