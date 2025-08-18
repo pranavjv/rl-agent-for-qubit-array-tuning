@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
-from stable_baselines3.common.policies import BasePolicy
+from stable_baselines3.common.policies import BasePolicy, ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, Schedule, PyTorchObs
 from stable_baselines3.common.utils import FloatSchedule, explained_variance, obs_as_tensor
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
@@ -184,7 +184,7 @@ class CustomAgentPolicy(BasePolicy):
             self.agent.train(mode)
 
 
-class PPO(OnPolicyAlgorithm):
+class RecurrentPPO(OnPolicyAlgorithm):
     def __init__(
         self,
         policy: Union[str, type[ActorCriticPolicy]],
@@ -205,6 +205,7 @@ class PPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         use_sde: bool = False,
         sde_sample_freq: int = -1,
+        use_wandb: bool = False,
         # Custom agent parameters
         agent_class=None,
         agent_kwargs: Dict[str, Any] = None,
@@ -217,7 +218,7 @@ class PPO(OnPolicyAlgorithm):
                 "agent_class": agent_class,
                 "agent_kwargs": agent_kwargs or {}
             })
-            policy = "CustomAgentPolicy"
+            policy = CustomAgentPolicy
 
         assert batch_size > 1, "`batch_size` must be greater than 1"
 
@@ -226,6 +227,27 @@ class PPO(OnPolicyAlgorithm):
         self.clip_range = clip_range
         self.clip_range_vf = clip_range_vf
         self.normalize_advantage = normalize_advantage
+        self.use_wandb = use_wandb
+
+        if use_wandb:
+            wandb.init(
+                project="qarray_ppo",
+                config={
+                    "learning_rate": learning_rate,
+                    "n_steps": n_steps,
+                    "batch_size": batch_size,
+                    "n_epochs": n_epochs,
+                    "gamma": gamma,
+                    "gae_lambda": gae_lambda,
+                    "clip_range": clip_range,
+                    "clip_range_vf": clip_range_vf,
+                    "normalize_advantage": normalize_advantage,
+                    "ent_coef": ent_coef,
+                    "vf_coef": vf_coef,
+                    "max_grad_norm": max_grad_norm,
+                }
+            )
+
 
         super().__init__(
             policy,
@@ -251,13 +273,34 @@ class PPO(OnPolicyAlgorithm):
 
         self._setup_model()
 
+    def _setup_model(self) -> None:
+        super()._setup_model()
+
+        recurrent_buffer_shape = (self.n_steps, self.agent.rssm.num_layers, self.n_envs, self.agent.rssm.hidden_dim)
+
+        self.rollout_buffer = RecurrentDictRolloutBuffer(
+            self.n_steps,
+            self.observation_space,
+            self.action_space,
+            recurrent_buffer_shape,
+            self.device,
+            gamma=self.gamma,
+            gae_lambda=self.gae_lambda,
+            n_envs=self.n_envs,
+        )
+
+        self.clip_range = FloatSchedule(self.clip_range)
+        if self.clip_range_vf is not None:
+            self.clip_range_vf = FloatSchedule(self.clip_range_vf)
+
+
     def collect_rollouts(
         self,
         env: VecEnv,
         callback: BaseCallback,
         rollout_buffer: RolloutBuffer,
         n_rollout_steps: int,
-    ) -> bool:
+    ) -> None:
         """
         Collect experiences using the current policy and fill a RolloutBuffer.
         """
@@ -342,15 +385,6 @@ class PPO(OnPolicyAlgorithm):
         callback.update_locals(locals())
         callback.on_rollout_end()
 
-        return True
-
-    def _setup_model(self) -> None:
-        super()._setup_model()
-
-        self.clip_range = FloatSchedule(self.clip_range)
-        if self.clip_range_vf is not None:
-            self.clip_range_vf = FloatSchedule(self.clip_range_vf)
-
 
     def train(self) -> None:
         self.policy.set_training_mode(True)
@@ -365,33 +399,40 @@ class PPO(OnPolicyAlgorithm):
         clip_fractions = []
 
         for epoch in range(self.n_epochs):
-            print('Epoch: ', epoch)
+            print(f'Epoch {epoch+1}/{self.n_epochs}')
             for rollout_data in tqdm(self.rollout_buffer.get(self.batch_size)):
                 actions = rollout_data.actions
-                if isinstance(self.action_space, spaces.Discrete):
-                    actions = rollout_data.actions.long().flatten()
 
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, log_prob, entropy = self.policy.evaluate_actions(
+                    rollout_data.observations,
+                    actions,
+                    rollout_data.recurrent_states,
+                    rollout_data.episode_starts,
+                )
+
                 values = values.flatten()
                 
+                # normalise advantages
                 advantages = rollout_data.advantages
                 if self.normalize_advantage and len(advantages) > 1:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-                ratio = th.exp(log_prob - rollout_data.old_log_prob)
+                # ratio between old and new policy
+                ratio = torch.exp(log_prob - rollout_data.old_log_prob)
 
+                # clipped surrogate loss
                 policy_loss_1 = advantages * ratio
-                policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-                policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
+                policy_loss_2 = advantages * torch.clamp(ratio, 1 - clip_range, 1 + clip_range)
+                policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 pg_losses.append(policy_loss.item())
-                clip_fraction = th.mean((th.abs(ratio - 1) > clip_range).float()).item()
+                clip_fraction = torch.mean((torch.abs(ratio - 1) > clip_range).float()).item()
                 clip_fractions.append(clip_fraction)
 
                 if self.clip_range_vf is None:
                     values_pred = values
                 else:
-                    values_pred = rollout_data.old_values + th.clamp(
+                    values_pred = rollout_data.old_values + torch.clamp(
                         values - rollout_data.old_values, -clip_range_vf, clip_range_vf
                     )
                 
@@ -399,29 +440,34 @@ class PPO(OnPolicyAlgorithm):
                 value_losses.append(value_loss.item())
 
                 if entropy is None:
-                    entropy_loss = -th.mean(-log_prob)
+                    entropy_loss = -torch.mean(-log_prob)
                 else:
-                    entropy_loss = -th.mean(entropy)
+                    entropy_loss = -torch.mean(entropy)
 
                 entropy_losses.append(entropy_loss.item())
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
+                # original code implements approx. KL-divergence for early stopping here
+
                 self.policy.optimizer.zero_grad()
                 loss.backward()
-                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
 
             self._n_updates += 1
 
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
 
-        self.logger.record("train/entropy_loss", np.mean(entropy_losses))
-        self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
-        self.logger.record("train/value_loss", np.mean(value_losses))
-        self.logger.record("train/clip_fraction", np.mean(clip_fractions))
-        self.logger.record("train/loss", loss.item())
-        self.logger.record("train/explained_variance", explained_var)
-        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
-        self.logger.record("train/clip_range", clip_range)
+        if self.use_wandb:
+            wandb.log({
+                "train/entropy_loss": np.mean(entropy_losses),
+                "train/policy_gradient_loss": np.mean(pg_losses),
+                "train/value_loss": np.mean(value_losses),
+                "train/clip_fraction": np.mean(clip_fractions),
+                "train/loss": loss.item(),
+                "train/explained_variance": explained_var,
+                "train/n_updates": self._n_updates,
+                "train/clip_range": clip_range,
+            })
 

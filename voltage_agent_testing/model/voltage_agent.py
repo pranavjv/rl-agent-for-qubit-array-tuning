@@ -135,7 +135,9 @@ class Agent(nn.Module):
         if print_size:
             print(f'Initialised RSSM with {sum(p.numel() for p in self.rssm.parameters())} parameters')
 
-        self.recurrent_state = torch.zeros((1, recurrent_dim), dtype=torch.float32).to(device)
+        # self.actor_recurrent_state = torch.zeros((1, recurrent_dim), dtype=torch.float32).to(device)
+        # self.critic_recurrent_state = torch.zeros((1, recurrent_dim), dtype=torch.float32).to(device)
+        self.recurrent_state_size = (1, recurrent_dim)
 
         if print_size:
             print(f'Agent initialised with {sum(p.numel() for p in self.parameters())} parameters')

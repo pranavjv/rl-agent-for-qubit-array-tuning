@@ -1,6 +1,6 @@
 import torch
 
-from policy import PPO
+from policy import RecurrentPPO
 from envs.qarray_2dot_env import QuantumDeviceEnv
 from model.voltage_agent import Agent
 
@@ -8,7 +8,7 @@ from model.voltage_agent import Agent
 def main():
     env = QuantumDeviceEnv()
     
-    model = PPO(
+    model = RecurrentPPO(
         "CustomAgentPolicy", 
         env, 
         agent_class=Agent,
@@ -17,8 +17,9 @@ def main():
             'action_dim': 2, 
             'num_input_voltages': 2,
         },
-        n_steps=128,
+        n_steps=128, # rollouts
         batch_size=64,
+        use_wandb=False,
     )
     
     print('Training ...')
