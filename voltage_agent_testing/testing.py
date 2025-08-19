@@ -1,6 +1,5 @@
 import torch
 
-#from policy import RecurrentPPO
 #from sb3_contrib import RecurrentPPO
 from policy import CustomAgentPolicy
 from policy import CustomRecurrentPPO
@@ -35,14 +34,24 @@ def main():
         },
         policy=CustomAgentPolicy,
         env=env,
-        #n_steps=2048,
+        use_wandb=True,
+        learning_rate=1e-4,
+        gamma=0.99,
+        ent_coef=1e-3,
+        vf_coef=5e-4,
+        gae_lambda=0.95,
     )
     
-    print('Learning ...')
     model.learn(
-        total_timesteps=1000,
+        total_timesteps=2_000_000,
         progress_bar=True,
     )
+
+    torch.save({
+        "model": model.policy.agent.state_dict(),
+        "optimizer": model.policy.optimizer.state_dict(),
+    }, "ppo_ckpt_0.pth")
+
 
 if __name__ == '__main__':
     main()
