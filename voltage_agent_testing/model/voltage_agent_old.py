@@ -41,10 +41,6 @@ class Actor(nn.Module):
         self.max_log_std = max_log_std
 
     def forward(self, latent: torch.Tensor, recurrent: torch.Tensor, greedy: bool = False) -> torch.Tensor:
-        # h, c = recurrent # discard c
-        # h = h.squeeze(0) if h.ndim == 3 else h
-
-        # could have separate input heads for recurrent and latent
         x = torch.cat((latent, recurrent), dim=-1)
         x = self.mlp(x)
         mean = self.mean_head(x)
@@ -126,7 +122,7 @@ class Agent(nn.Module):
             output_dim=1
         ) # for predicting when the agent has reached the goal
         self.critic = MLP(
-            input_dim=feature_dim + recurrent_dim,
+            input_dim=feature_dim,
             hidden_dims=[128, 64, 64],
             output_dim=1
         ) # for predicting expected rewards (or whatever our value function is)
@@ -157,24 +153,27 @@ class Agent(nn.Module):
         return torch.cat([img_feats, voltage_feats], dim=-1)
 
 
-    def forward_step(self, feats: torch.Tensor, recurrent_state: torch.Tensor):
-        # if update_recurrent:
-        #     recurrent_state = self.rssm(recurrent_state, feats)
+    def get_quality(self, feats: torch.Tensor):
+        logits = self.quality_head(feats)
+        return torch.softmax(logits)
+
+
+    def forward_step(self, feats: torch.Tensor, recurrent_state: Union[torch.Tensor, Tuple[torch.Tensor]], update_recurrent: bool = True):
+        if update_recurrent:
+            recurrent_state = self.rssm(recurrent_state, feats)
         quality_logits = self.quality_head(feats)
-        x = torch.cat([feats, recurrent_state], dim=-1)
-        value = self.critic(x)
+        value = self.critic(feats)
         action, dist, logprob = self.actor(feats, recurrent_state)
-        return action, dist, logprob, quality_logits, value
+        return action, dist, logprob, quality_logits, value, recurrent_state
 
 
-    def get_values(self, feats: torch.Tensor, recurrent_state: torch.Tensor):
-        x = torch.cat([feats, recurrent_state], dim=-1)
-        return self.critic(x)
+    def get_values(self, feats: torch.Tensor, recurrent_state: Union[torch.Tensor, Tuple[torch.Tensor]]):
+        return self.critic(feats, recurrent_state)
 
 
-    def predict_action(self, feats: torch.Tensor, recurrent_state: torch.Tensor):
-        # if update_recurrent:
-        #     recurrent_state = self.rssm(recurrent_state, feats)
+    def predict_action(self, feats: torch.Tensor, recurrent_state: Union[torch.Tensor, Tuple[torch.Tensor]], update_recurrent: bool = True):
+        if update_recurrent:
+            recurrent_state = self.rssm(recurrent_state, feats)
         action, _, _ = self.actor(feats, recurrent_state)
         return action, recurrent_state
 
