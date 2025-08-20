@@ -1,29 +1,17 @@
 import torch
 
 #from sb3_contrib import RecurrentPPO
-from policy import CustomAgentPolicy
-from policy import CustomRecurrentPPO
-
+#from policy import CustomRecurrentPPO
+from ppo_recurrent import RecurrentPPO
 from envs.qarray_2dot_env import QuantumDeviceEnv
 from model.voltage_agent import Agent
+from policy import CustomAgentPolicy
+
+from stable_baselines3.common.env_util import make_vec_env
 
 
-def main():
+def main0():
     env = QuantumDeviceEnv()
-    
-    # model = RecurrentPPO(
-    #     "CustomAgentPolicy", 
-    #     env, 
-    #     agent_class=Agent,
-    #     agent_kwargs={
-    #         'input_channels': 1, 
-    #         'action_dim': 2, 
-    #         'num_input_voltages': 2,
-    #     },
-    #     n_steps=128, # rollouts
-    #     batch_size=64,
-    #     use_wandb=False,
-    # )
 
     model = CustomRecurrentPPO(
         agent_class=Agent,
@@ -42,15 +30,19 @@ def main():
         gae_lambda=0.95,
     )
     
-    model.learn(
-        total_timesteps=2_000_000,
-        progress_bar=True,
+
+def main():
+    env = make_vec_env(QuantumDeviceEnv, n_envs=1)
+    model = RecurrentPPO(
+        "CnnLstmPolicy",
+        env,
+        verbose=1,
+        use_wandb=True,
+        vf_coef=1e-5,
     )
 
-    torch.save({
-        "model": model.policy.agent.state_dict(),
-        "optimizer": model.policy.optimizer.state_dict(),
-    }, "ppo_ckpt_0.pth")
+    model.learn(total_timesteps=1_000_000, progress_bar=True)
+    model.save("recurrent_ppo_v0")
 
 
 if __name__ == '__main__':
