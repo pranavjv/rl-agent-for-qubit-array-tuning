@@ -200,7 +200,7 @@ def print_dataset_info(data_dir: str):
 def main():
     """Main function to run all tests."""
     # Set data directory
-    data_dir = "/home/rahul/Summer2025/rl-agent-for-qubit-array-tuning/Swarm/Qarray/example_dataset"
+    data_dir = "/home/rahul/Summer2025/rl-agent-for-qubit-array-tuning/Swarm/Qarray/dataset_v1"
     output_dir = "dataset_analysis"
     
     # Check if data directory exists
