@@ -20,11 +20,11 @@ class CapacitancePredictionModel(nn.Module):
         # Load pretrained MobileNetV3 backbone
         self.backbone = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
         
-        # Modify first conv layer to accept 2 channels instead of 3
+        # Modify first conv layer to accept 1 channels instead of 3
         # In MobileNetV3, the first conv layer is features[0][0]
         original_conv1 = self.backbone.features[0][0]
         self.backbone.features[0][0] = nn.Conv2d(
-            in_channels=2,  # Changed from 3 to 2 channels
+            in_channels=1,  # Changed from 3 to 1 channels
             out_channels=original_conv1.out_channels,
             kernel_size=original_conv1.kernel_size,
             stride=original_conv1.stride,
@@ -34,9 +34,9 @@ class CapacitancePredictionModel(nn.Module):
         
         # Initialize new conv1 weights
         with torch.no_grad():
-            # Use the first 2 channels of the original conv1 weights
+            # Use the first 1 channels of the original conv1 weights
             self.backbone.features[0][0].weight = nn.Parameter(
-                original_conv1.weight[:, :2, :, :].clone()
+                original_conv1.weight[:, :1, :, :].clone()
             )
         
         # Remove the final classification layer
@@ -139,7 +139,7 @@ def create_model():
     return CapacitancePredictionModel()
 
 
-def create_loss_function(mse_weight=1.0, nll_weight=1.0):
+def create_loss_function(mse_weight=1.0, nll_weight=0.1):
     """Factory function to create the loss function"""
     return CapacitanceLoss(mse_weight, nll_weight)
 

@@ -1,0 +1,116 @@
+# Environment Configuration
+# This file contains all parameters for the quantum device simulator and RL environment
+
+simulator:
+  model:
+    # Capacitance matrices for quantum dots (dot-to-dot coupling)
+    # For 4-dot linear array with structured coupling
+    Cdd:
+      # Diagonal elements (self-capacitance, normalized to 0)
+      diagonal: 0
+      # Nearest neighbor coupling (adjacent dots)
+      nearest_neighbor: {"min": 0.25, "max": 0.35}
+      # Next-nearest neighbor coupling (one dot separation)
+      next_nearest: {"min": 0.03, "max": 0.07}
+      # Furthest neighbor coupling (opposite ends)
+      furthest: {"min": 0.005, "max": 0.015}
+    
+    # Gate-to-dot capacitance matrix (4 dots x 5 gates: 4 plunger + 1 sensor)
+    # Each row represents one dot's coupling to all 5 gates
+    Cgd:
+      - [{"min": 0.8, "max": 1.}, {"min": 0.15, "max": 0.45}, {"min": 0.13, "max": 0.2}, {"min": 0.005, "max": 0.015}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0.15, "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.15, "max": 0.45}, {"min": 0.13, "max": 0.2}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0.13, "max": 0.2}, {"min": 0.15, "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.15, "max": 0.45}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0.005, "max": 0.015}, {"min": 0.13, "max": 0.2}, {"min": 0.15, "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.01, "max": 0.03}]
+    
+    # Dot-to-sensor capacitance matrix (4 dots)
+    Cds: [{"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}]
+    
+    # Gate-to-sensor capacitance matrix (5 gates: 4 plunger + 1 sensor gate)
+    Cgs: [{"min": 0.0, "max": 0.05}, {"min": 0.0, "max": 0.05}, {"min": 0.0, "max": 0.05}, {"min": 0.0, "max": 0.05}, {"min": 0.8, "max": 1.0}]
+
+    
+    # White noise amplitude for charge stability diagram
+    white_noise_amplitude: {"min": 0.00, "max": 0.01}
+    
+    # Telegraph noise parameters (random telegraph noise)
+    telegraph_noise_parameters:
+      p01: {"min": 0.0, "max": 0.01}  # Probability of transition from 0 to 1
+      p10_factor: {"min": 0, "max": 100}    # Factor for probability of transition from 1 to 0
+      amplitude: {"min": 0.0, "max": 0.012}  # Amplitude of telegraph noise
+    
+    # Latching model parameters for charge state transitions
+    latching_model_parameters:
+      Exists: True #not used
+      n_dots: 4     # Number of quantum dots
+      p_leads: {"min": 0.2, "max": 1.0}  # Lead coupling probabilities
+      p_inter: {"min": 0.2, "max": 1.0}  # Inter-dot coupling probabilities
+    
+    # Temperature in mK
+    T: {"min": 10, "max": 50}
+    
+    # Width of coulomb peaks
+    coulomb_peak_width: {"min": 0.30, "max": 0.31}
+
+    # Algorithm for charge stability diagram
+    algorithm: "default"
+    # Implementation for charge stability diagram
+    implementation: "rust"
+    # Maximum number of charge carriers
+    max_charge_carriers: 7
+
+  measurement:
+    # Voltage sweep ranges for charge stability diagram
+    v_min: -2.0
+    v_max: 2.0
+
+    resolution: 200
+    
+    # Gate sweeping configuration for central two-dot focus
+    swept_gates: [1, 2]  # Central plunger gates (0-indexed)
+    fixed_gates: [0, 3, 4]  # Outer plunger gates + sensor gate
+    fixed_gate_voltages: {"min": -1.0, "max": 1.0}  # Random fixed voltages
+    sensor_gate_voltage: {"min": 0.5, "max": 1.0}  # Sensor gate typically positive
+    
+    # Optimal gate voltage center for target state, note this is not in volts but in charge occupancy
+    #model.optimal_Vg(center) gives the optimal gate voltage in volts from desired charge occupancy
+    optimal_VG_center: [1, 1, 1, 1, 0.4]  # 4 dots + sensor (changed to 0.4 for sensor)
+
+  # Virtual gate transformation matrix (5x5 identity for 5 gates)
+  virtual_gate_matrix:
+    - [1, 0, 0, 0, 0]
+    - [0, 1, 0, 0, 0]
+    - [0, 0, 1, 0, 0]
+    - [0, 0, 0, 1, 0]
+    - [0, 0, 0, 0, 1]
+
+
+env:
+  # Maximum number of steps per episode
+  max_steps: 50
+  
+  action_space:
+    num_voltages: 2  # Only central two gates swept
+    voltage_range: [-5.0, 5.0]
+  
+  observation_space:
+    image_size: [128, 128]
+    channels: 1
+    normalization_range: [0.0, 1.0]
+    dtype: "float32"
+  
+  reward:
+  
+  #tolerance for termination criteria
+  tolerance: 0.5
+
+
+training:
+  # Random seed for reproducibility
+  seed: 42
+  # Enable debug mode
+  debug: true
+  # Frames per second for rendering
+  render_fps: 10 
+  # Render mode
+  render_mode: "human"
