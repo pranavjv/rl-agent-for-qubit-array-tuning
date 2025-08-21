@@ -236,10 +236,10 @@ def get_transforms(normalize: bool = True):
     transform_list = []
     
     if normalize:
-        # Normalize based on observed range [0.25, 1.14]
+        # Normalize based on observed range
         # Convert to approximately zero mean, unit variance
-        mean = 0.695  # Approximate middle of range
-        std = 0.297   # Approximate std based on range
+        mean = 0.34  # Approximate middle of range
+        std = 0.14   # Approximate std based on range
         transform_list.append(transforms.Normalize(mean=[mean], std=[std]))
     
     return transforms.Compose(transform_list) if transform_list else None

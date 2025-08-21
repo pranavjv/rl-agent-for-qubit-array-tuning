@@ -18,10 +18,10 @@ simulator:
     # Gate-to-dot capacitance matrix (4 dots x 5 gates: 4 plunger + 1 sensor)
     # Each row represents one dot's coupling to all 5 gates
     Cgd:
-      - [{"min": 0.8, "max": 1.}, {"min": 0.15, "max": 0.45}, {"min": 0.13, "max": 0.2}, {"min": 0.005, "max": 0.015}, {"min": 0.01, "max": 0.03}]
-      - [{"min": 0.15, "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.15, "max": 0.45}, {"min": 0.13, "max": 0.2}, {"min": 0.01, "max": 0.03}]
-      - [{"min": 0.13, "max": 0.2}, {"min": 0.15, "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.15, "max": 0.45}, {"min": 0.01, "max": 0.03}]
-      - [{"min": 0.005, "max": 0.015}, {"min": 0.13, "max": 0.2}, {"min": 0.15, "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0.8, "max": 1.}, {"min": 0., "max": 0.45}, {"min": 0., "max": 0.2}, {"min": 0., "max": 0.015}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0., "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0., "max": 0.45}, {"min": 0., "max": 0.2}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0., "max": 0.2}, {"min": 0., "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0., "max": 0.45}, {"min": 0.01, "max": 0.03}]
+      - [{"min": 0., "max": 0.015}, {"min": 0., "max": 0.2}, {"min": 0., "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.01, "max": 0.03}]
     
     # Dot-to-sensor capacitance matrix (4 dots)
     Cds: [{"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}]
@@ -31,7 +31,7 @@ simulator:
 
     
     # White noise amplitude for charge stability diagram
-    white_noise_amplitude: {"min": 0.00, "max": 0.01}
+    white_noise_amplitude: {"min": 0.00, "max": 0.05}
     
     # Telegraph noise parameters (random telegraph noise)
     telegraph_noise_parameters:
@@ -47,10 +47,10 @@ simulator:
       p_inter: {"min": 0.2, "max": 1.0}  # Inter-dot coupling probabilities
     
     # Temperature in mK
-    T: {"min": 10, "max": 50}
+    T: {"min": 50, "max": 200}
     
     # Width of coulomb peaks
-    coulomb_peak_width: {"min": 0.30, "max": 0.31}
+    coulomb_peak_width: {"min": 0.25, "max": 0.35}
 
     # Algorithm for charge stability diagram
     algorithm: "default"
@@ -107,7 +107,7 @@ env:
 
 training:
   # Random seed for reproducibility
-  seed: 42
+  seed: 43
   # Enable debug mode
   debug: true
   # Frames per second for rendering

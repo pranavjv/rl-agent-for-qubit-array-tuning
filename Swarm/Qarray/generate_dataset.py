@@ -24,7 +24,7 @@ def main():
         total_samples=500000,       # dataset size
         batch_size= 500,            # batch size
         workers=10,                 # number of workers
-        output_dir='./example_dataset',
+        output_dir='./dataset_v1',
         config_path='qarray_config.yaml',
         voltage_range=(-1.0, 1.0),
         resolution=128,
