@@ -1,0 +1,6 @@
+simulator:
+  # Max steps in a single training rollout
+  max_steps: 50
+  # Tolerance from ground truth when we are done
+  tolerance: 0.5
+  

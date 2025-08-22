@@ -24,11 +24,13 @@ simulator:
       - [{"min": 0., "max": 0.015}, {"min": 0., "max": 0.2}, {"min": 0., "max": 0.45}, {"min": 0.8, "max": 1.}, {"min": 0.01, "max": 0.03}]
     
     # Dot-to-sensor capacitance matrix (4 dots)
-    Cds: [{"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}, {"min": 0.05, "max": 0.08}]
+    Cds:
+      dots: {"min": 0.05, "max": 0.08}
     
     # Gate-to-sensor capacitance matrix (5 gates: 4 plunger + 1 sensor gate)
-    Cgs: [{"min": 0.0, "max": 0.05}, {"min": 0.0, "max": 0.05}, {"min": 0.0, "max": 0.05}, {"min": 0.0, "max": 0.05}, {"min": 0.8, "max": 1.0}]
-
+    Cgs:
+      dots: {"min": 0.0, "max": 0.05}
+      sensor: {"min": 0.8, "max": 1.0}
     
     # White noise amplitude for charge stability diagram
     white_noise_amplitude: {"min": 0.00, "max": 0.05}
@@ -61,56 +63,22 @@ simulator:
 
   measurement:
     # Voltage sweep ranges for charge stability diagram
-    v_min: -2.0
-    v_max: 2.0
+    gate_voltage_sweep_range: {"min": -2.0, "max": 2.0}
 
-    resolution: 200
-    
-    # Gate sweeping configuration for central two-dot focus
-    swept_gates: [1, 2]  # Central plunger gates (0-indexed)
-    fixed_gates: [0, 3, 4]  # Outer plunger gates + sensor gate
-    fixed_gate_voltages: {"min": -1.0, "max": 1.0}  # Random fixed voltages
-    sensor_gate_voltage: {"min": 0.5, "max": 1.0}  # Sensor gate typically positive
+    gate_voltage_range: {"min": -5.0, "max": 5.0}
+
+    barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO
+
+    resolution: 128
     
     # Optimal gate voltage center for target state, note this is not in volts but in charge occupancy
     #model.optimal_Vg(center) gives the optimal gate voltage in volts from desired charge occupancy
-    optimal_VG_center: [1, 1, 1, 1, 0.4]  # 4 dots + sensor (changed to 0.4 for sensor)
+    optimal_VG_center: {"dots": 1.0, "sensor": 0.4}
 
-  # Virtual gate transformation matrix (5x5 identity for 5 gates)
-  virtual_gate_matrix:
-    - [1, 0, 0, 0, 0]
-    - [0, 1, 0, 0, 0]
-    - [0, 0, 1, 0, 0]
-    - [0, 0, 0, 1, 0]
-    - [0, 0, 0, 0, 1]
-
-
-env:
-  # Maximum number of steps per episode
-  max_steps: 50
-  
-  action_space:
-    num_voltages: 2  # Only central two gates swept
-    voltage_range: [-5.0, 5.0]
-  
-  observation_space:
-    image_size: [128, 128]
-    channels: 1
-    normalization_range: [0.0, 1.0]
-    dtype: "float32"
-  
-  reward:
-  
-  #tolerance for termination criteria
-  tolerance: 0.5
-
+    sensor_gate_voltage: {"min": 0.5, "max": 1.0}  # Sensor gate typically positive
 
 training:
   # Random seed for reproducibility
   seed: 43
   # Enable debug mode
-  debug: true
-  # Frames per second for rendering
-  render_fps: 10 
-  # Render mode
-  render_mode: "human"
+  debug: false
