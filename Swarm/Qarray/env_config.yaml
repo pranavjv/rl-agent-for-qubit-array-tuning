@@ -1,6 +1,19 @@
+# Env configuration
+# Contains all configs related to the environment and the rl algorithm
+
 simulator:
+  num_dots: 8
+
   # Max steps in a single training rollout
   max_steps: 50
   # Tolerance from ground truth when we are done
   tolerance: 0.5
   
+
+  measurement:
+    # Voltage sweep ranges for charge stability diagram
+    gate_voltage_sweep_range: {"min": -2.0, "max": 2.0}
+    # Total gate voltage range
+    gate_voltage_range: {"min": -5.0, "max": 5.0}
+    # Total barrier voltage range
+    barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO

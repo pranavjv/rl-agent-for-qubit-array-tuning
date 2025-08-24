@@ -1,5 +1,4 @@
-# Environment Configuration
-# This file contains all parameters for the quantum device simulator and RL environment
+# This file contains all parameters for the base qarray simulator
 
 simulator:
   model:
@@ -62,13 +61,7 @@ simulator:
     max_charge_carriers: 7
 
   measurement:
-    # Voltage sweep ranges for charge stability diagram
-    gate_voltage_sweep_range: {"min": -2.0, "max": 2.0}
-
-    gate_voltage_range: {"min": -5.0, "max": 5.0}
-
-    barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO
-
+    # resolution for simulator images
     resolution: 128
     
     # Optimal gate voltage center for target state, note this is not in volts but in charge occupancy
@@ -77,8 +70,7 @@ simulator:
 
     sensor_gate_voltage: {"min": 0.5, "max": 1.0}  # Sensor gate typically positive
 
-training:
-  # Random seed for reproducibility
-  seed: 43
-  # Enable debug mode
-  debug: false
+
+init:
+  debug: true
+  seed: 42

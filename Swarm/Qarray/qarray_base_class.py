@@ -23,37 +23,19 @@ Qarray base class with full randomisation
 supports environment initialisation for both training and inference
 """
 
-class QarrayBaseClass(gym.Env):
+class QarrayBaseClass:
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
-
-    @staticmethod
-    def get_global_rollout_counter():
-        QarrayBaseClass._init_counter_file()
-        with open(QarrayBaseClass.COUNTER_FILE, 'r') as f:
-            data = json.load(f)
-            now = time.time()
-            start_time = data.get("start_time", now)
-            elapsed = now - start_time
-            return data.get("total_rollouts", 0), elapsed
-
-    _instance_count = 0
     
     def __init__(self, num_dots, config_path='qarray_config.yaml', randomise_actions=True, render_mode=None, counter_file=None, **kwargs):
         assert num_dots % 4 == 0, "Currently we only support multiples of 4 dots"
         print(f'Initialising qarray env with {num_dots} dots ...')
-        super().__init__()
-
-        QarrayBaseClass._instance_count += 1
-        self._instance_id = QarrayBaseClass._instance_count
-        self._local_rollouts = 0
-        self.counter_file = counter_file
 
         # --- Load Configuration ---
         config_path = os.path.join(os.path.dirname(__file__), config_path)
         self.config = self._load_config(config_path)
 
-        self.debug = self.config['training']['debug']
-        self.seed = self.config['training']['seed']
+        self.debug = self.config['init']['debug']
+        self.seed = self.config['init']['seed']
 
         # these to be added to the main env.py file
         # self.max_steps = self.config['env']['max_steps']
@@ -62,89 +44,31 @@ class QarrayBaseClass(gym.Env):
 
         optimal_center_dots = self.config['simulator']['measurement']['optimal_VG_center']['dots']
         optimal_center_sensor = self.config['simulator']['measurement']['optimal_VG_center']['sensor']
-        self.optimal_VG_center = [optimal_center_dots] * num_dots + [optimal_center_sensor]
+        optimal_VG_center = [optimal_center_dots] * num_dots + [optimal_center_sensor]
 
         # --- Define Action and Observation Spaces ---
         self.num_dots = num_dots
         self.num_gate_voltages = num_dots
         self.num_barrier_voltages = num_dots - 1
-        self.gate_voltage_min = self.config['simulator']['measurement']['gate_voltage_range']['min']
-        self.gate_voltage_max = self.config['simulator']['measurement']['gate_voltage_range']['max']
-        self.barrier_voltage_min = self.config['simulator']['measurement']['barrier_voltage_range']['min']
-        self.barrier_voltage_max = self.config['simulator']['measurement']['barrier_voltage_range']['max']
-
-        self.action_space = spaces.Dict({
-            'action_gate_voltages': spaces.Box(
-                low=self.gate_voltage_min,
-                high=self.gate_voltage_max,
-                shape=(self.num_gate_voltages,),
-                dtype=np.float32
-            ),
-            'action_barrier_voltages': spaces.Box(
-                low=self.barrier_voltage_min,
-                high=self.barrier_voltage_max,
-                shape=(self.num_barrier_voltages,),
-                dtype=np.float32
-            ),
-        })
-
-        # Observation space for quantum device state - multi-modal with image and voltages
-        self.obs_image_size = self.config['simulator']['measurement']['resolution']
-        self.obs_channels = self.num_dots - 1
-        self.obs_normalization_range = [0., 1.] # default zero to one
         
-        # Define multi-modal observation space using Dict
-        self.observation_space = spaces.Dict({
-            'image': spaces.Box(
-                low=0,
-                high=255,
-                shape=(self.obs_image_size, self.obs_image_size, self.obs_channels),
-                dtype=np.uint8
-            ),
-            'obs_gate_voltages': spaces.Box(
-                low=self.gate_voltage_min,
-                high=self.gate_voltage_max,
-                shape=(self.num_gate_voltages,),
-                dtype=np.float32
-            ),
-            'obs_barrier_voltages': spaces.Box(
-                low=self.barrier_voltage_min,
-                high=self.barrier_voltage_max,
-                shape=(self.num_barrier_voltages,),
-                dtype=np.float32
-            )
-        })
+        self.obs_image_size = self.config['simulator']['measurement']['resolution']
 
-        self.obs_voltage_min = self.config['simulator']['measurement']['gate_voltage_sweep_range']['min']
-        self.obs_voltage_max = self.config['simulator']['measurement']['gate_voltage_sweep_range']['max']
-
-        self.randomise_actions = randomise_actions
         self._init_random_action_scaling()
 
         # --- Initialize Model (one-time setup) ---
         self.model = self._load_model()
-        
+
+        self.gate_ground_truth = self.model.optimal_Vg(optimal_VG_center) # only change if we update the model itself
+        self.barrier_ground_truth = None # TODO
+
         # --- Initialize normalization parameters ---
         self._init_normalization_params()
 
-
-    def _increment_global_counter(self):
-        if self.counter_file is not None:
-            with open(self.counter_file, 'r+') as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                data = json.load(f)
-                data["total_rollouts"] += 1
-                now = time.time()
-                start_time = data.get("start_time", now)
-                elapsed = now - start_time
-                f.seek(0)
-                json.dump(data, f)
-                f.truncate()
-                fcntl.flock(f, fcntl.LOCK_UN)
-                return data["total_rollouts"], elapsed
-
     
     def _init_random_action_scaling(self):
+        """
+        internally scales the action after receiving it from the environment
+        """
         if self.randomise_actions:
             self.action_scale_factor = []
             self.action_offset = []
@@ -182,6 +106,7 @@ class QarrayBaseClass(gym.Env):
         
         if self.debug:
             print(f"Initial normalization range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+
 
     def _update_normalization_bounds(self, raw_data):
         """
@@ -224,6 +149,7 @@ class QarrayBaseClass(gym.Env):
             
             if self.debug:
                 print(f"Updated normalization bounds to [{self.data_min:.4f}, {self.data_max:.4f}] (update #{self.update_count})")
+
 
     def _normalize_observation(self, raw_data):
         """
@@ -268,12 +194,6 @@ class QarrayBaseClass(gym.Env):
         Returns:
             np.ndarray: Charge sensor data of shape (height, width, channels)
         """
-        # z, _ = self.device_state["model"].charge_sensor_open(voltages)
-
-        # vg_current = self.model.gate_voltage_composer.do2d(
-        #     gate1, center[0]+self.obs_voltage_min, center[0]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
-        #     gate2, center[1]+self.obs_voltage_min, center[1]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
-        # )
 
         z, _ = self.device_state["model"].do2d_open(
             gate1, voltages[0]+self.obs_voltage_min, voltages[0]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
@@ -282,83 +202,68 @@ class QarrayBaseClass(gym.Env):
         return z
 
 
-    def get_raw_observation(self):
-        """
-        Get raw (unnormalized) observation data for debugging purposes.
-        
-        Returns:
-            np.ndarray: Raw charge sensor data of shape (height, width)
-        """
-        voltage_centers = self.device_state["voltage_centers"]
-        z = self._get_charge_sensor_data(voltage_centers, gate1=2, gate2=3)
-        return z[:, :, 0]
+    def _reset(self):
+        pass
 
     
-    def reset(self, seed=None, options=None):
-        """
-        Resets the environment to an initial state and returns the initial observation.
+    # def reset(self, seed=None, options=None): # done
+    #     """
+    #     Resets the environment to an initial state and returns the initial observation.
 
-        This method is called at the beginning of each new episode. It should
-        reset the state of the environment and return the first observation that
-        the agent will see.
+    #     This method is called at the beginning of each new episode. It should
+    #     reset the state of the environment and return the first observation that
+    #     the agent will see.
 
-        Args:
-            seed (int, optional): Random seed for reproducibility.
-            options (dict, optional): Additional options for reset.
+    #     Args:
+    #         seed (int, optional): Random seed for reproducibility.
+    #         options (dict, optional): Additional options for reset.
 
-        Returns:
-            observation (np.ndarray): The initial observation of the space.
-            info (dict): A dictionary with auxiliary diagnostic information.
-        """
+    #     Returns:
+    #         observation (np.ndarray): The initial observation of the space.
+    #         info (dict): A dictionary with auxiliary diagnostic information.
+    #     """
 
-        self._increment_global_counter()
+    #     self._increment_global_counter()
 
-        # Handle seed if provided
-        if seed is not None:
-            super().reset(seed=seed)
-        else:
-            super().reset(seed=None)
+    #     # Handle seed if provided
+    #     if seed is not None:
+    #         super().reset(seed=seed)
+    #     else:
+    #         super().reset(seed=None)
 
-        # --- Reset the environment's state ---
-        self.current_step = 0
+    #     # --- Reset the environment's state ---
+    #     self.current_step = 0
         
-        # Reset episode-specific normalization statistics
-        self.episode_min = float('inf')
-        self.episode_max = float('-inf')
+    #     # Reset episode-specific normalization statistics
+    #     self.episode_min = float('inf')
+    #     self.episode_max = float('-inf')
+
+    #     # Initialize episode-specific voltage state
+    #     #random actions scaling
+    #     self._init_random_action_scaling()
+    #     #center of current window
+    #     center = self._random_center()
+
+    #     optimal_VG_center = self.model.optimal_Vg(self.optimal_VG_center)
+
+    #     # Device state variables (episode-specific)
+    #     self.device_state = {
+    #         "model": self.model,
+    #         "gate_ground_truth": optimal_VG_center,
+    #         "barrier_ground_truth": self.barrier_ground_truth,
+    #         "current_gate_voltages": center["gates"],
+    #         "current_barrier_voltages": center["barriers"],
+    #     }
 
 
-        # Initialize episode-specific voltage state
-        #random actions scaling
-        self._init_random_action_scaling()
-        #center of current window
-        center = self._random_center()
+    #     # --- Return the initial observation ---
+    #     observation = self._get_obs()
+    #     info = self._get_info() 
 
-        # #current window
-        # vg_current = self.model.gate_voltage_composer.do2d(
-        #     1, center[0]+self.obs_voltage_min, center[0]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
-        #     2, center[1]+self.obs_voltage_min, center[1]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
-        # )
-
-        optimal_VG_center = self.model.optimal_Vg(self.optimal_VG_center)
-
-        # Device state variables (episode-specific)
-        self.device_state = {
-            "model": self.model,
-            "gate_ground_truth": optimal_VG_center,
-            "barrier_ground_truth": None, # TODO will have to add
-            "current_gate_voltages": center["gates"],
-            "current_barrier_voltages": center["barriers"],
-        }
-
-
-        # --- Return the initial observation ---
-        observation = self._get_obs()
-        info = self._get_info() 
-
-        return observation, info
+    #     return observation, info
         
 
-    def step(self, action): # done
+    def step(self, action):
         """
         Updates the environment state based on the agent's action.
 
@@ -395,7 +300,7 @@ class QarrayBaseClass(gym.Env):
         barrier_voltages = np.array(barrier_voltages).flatten().astype(np.float32)
 
         if self.debug:
-            print(f'Scaled voltage outputs: {gate_voltages, barrier_voltages}')
+            print(f'Scaled voltage outputs: {gate_voltages}')
 
         self._apply_voltages({"gates": gate_voltages, "barriers": barrier_voltages}) #this step will update the voltages stored in self.device_state
 
@@ -451,27 +356,44 @@ class QarrayBaseClass(gym.Env):
         Reward is based on the distance from the target voltage sweep center, with maximum reward
         when the agent aligns the centers of the voltage sweeps. The reward is calculated
         as: max_possible_distance - current_distance, where max_possible_distance is the maximum
-        possible distance in the 2D voltage space to ensure positive rewards.
+        possible distance in the along the 1D voltage axis.
 
-        Only considers the first 2 dimensions (ignoring the third dimension).
+        A separate reward is given to each gate and barrier agent.
+
         The reward is also penalized by the number of steps taken to encourage efficiency.
         """
 
-        ground_truth_center = self.device_state["ground_truth_center"]
-        current_voltage_center = self.device_state["current_voltage_center"]
-        
-        distance = np.linalg.norm(ground_truth_center - current_voltage_center)
+        gate_ground_truth = self.device_state["gate_ground_truth"]
+        current_gate_voltages = self.device_state["current_gate_voltages"]
+        gate_distances = np.linalg.norm(gate_ground_truth - current_gate_voltages)
 
-        # max_possible_distance = np.sqrt(self.num_dots) * (self.obs_voltage_max - self.obs_voltage_min)
-        max_possible_distance = np.sqrt(self.num_dots) * (self.action_voltage_max - self.action_voltage_min)
+        barrier_ground_truth = self.device_state["barrier_ground_truth"]
+        current_barrier_voltages = self.device_state["current_barrier_voltages"]
+        barrier_distances = np.linalg.norm(barrier_ground_truth - current_barrier_voltages)
+
+        max_gate_distance = self.action_voltage_max - self.action_voltage_min # only gives reward when gt is visible
+        max_barrier_distance = self.barrier_voltage_max - self.barrier_voltage_min # always gives reward
+
 
         if self.current_step == self.max_steps:
-            # reward = max(max_possible_distance - distance, 0)*0.01
-            reward = (1 - distance / max_possible_distance) * 100
+            gate_rewards = (1 - gate_distances / max_gate_distance) * 100
+            barrier_rewards = (1 - barrier_distances / max_barrier_distance) * 100
         else:
-            reward = 0.0
+            gate_rewards = np.zeros_like(gate_distances)
+            barrier_rewards = np.zeros_like(barrier_distances)
 
-        reward -= self.current_step * 0.1
+
+        # if self.current_step == self.max_steps:
+        #     # reward = max(max_possible_distance - distance, 0)*0.01
+        #     reward = (1 - gate_distance / max_possible_distance) * 100
+        # else:
+        #     reward = 0.0
+
+        # reward -= self.current_step * 0.1
+
+        gate_rewards -= self.current_step * 0.1
+        # we don't give time penalty to the barriers are they are not responsible for navigation
+
 
         at_target = np.all(np.abs(ground_truth_center - current_voltage_center) <= self.tolerance)
         if at_target:
@@ -487,8 +409,67 @@ class QarrayBaseClass(gym.Env):
             elif prob <= self.done_threshold:
                 if at_target:
                     reward -= 100.0
+        
+        rewards = {
+            "gates": gate_rewards,
+            "barriers": barrier_rewards
+        }
 
-        return reward
+        return rewards
+
+
+    def _get_obs(self):
+        """
+        Helper method to get the current observation of the environment.
+        
+        Returns a multi-modal observation with image and voltage data as numpy arrays.
+        """
+        # Get current voltage configuration
+        # current_voltages = self.device_state["current_voltages"]
+        voltage_centers = self.device_state["voltage_centers"]
+        
+        # Get charge sensor data
+        # self.z = self._get_charge_sensor_data(current_voltages, gate1, gate2)
+        allgates = list(range(1, self.num_dots+1))
+        self.all_z = []
+        for (gate1, gate2) in zip(allgates[:-1], allgates[1:]):
+            z = self._get_charge_sensor_data(voltage_centers, gate1, gate2)
+            self.all_z.append(z)
+
+
+        all_images = []
+        voltage_centers = self.device_state["voltage_centers"]
+
+        expected_voltage_shape = (self.num_dots,)
+        
+        if voltage_centers.shape != expected_voltage_shape:
+            raise ValueError(f"Voltage observation shape {voltage_centers.shape} does not match expected {expected_voltage_shape}")
+
+
+        for z in self.all_z:
+            # Extract first channel and normalize for image observation
+            channel_data = z[:, :, 0]  # Shape: (height, width)
+            image_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
+            
+            # Create multi-modal observation dictionary with numpy arrays 
+            all_images.append(image_obs)
+
+        all_images = np.concatenate(all_images, axis=-1)
+        # all_images = all_images.squeeze(-1).transpose(1, 2, 0)
+            
+        # Validate observation structure
+        expected_image_shape = (self.obs_image_size, self.obs_image_size, self.obs_channels)
+
+        if all_images.shape != expected_image_shape:
+            raise ValueError(f"Image observation shape {all_images.shape} does not match expected {expected_image_shape}")
+
+        return {
+            "image": all_images, # creates a multi-channel image with each adjacent pair of voltage sweeps
+            "obs_gate_voltages": gate_voltages,
+            "obs_barrier_voltages": barrier_voltages
+        }
+    
+    # --- #
 
 
     def _gen_random_qarray_params(self, rng: np.random.Generator = None):
@@ -690,57 +671,6 @@ class QarrayBaseClass(gym.Env):
         return model
 
 
-    def _get_obs(self):
-        """
-        Helper method to get the current observation of the environment.
-        
-        Returns a multi-modal observation with image and voltage data as numpy arrays.
-        """
-        # Get current voltage configuration
-        # current_voltages = self.device_state["current_voltages"]
-        voltage_centers = self.device_state["voltage_centers"]
-        
-        # Get charge sensor data
-        # self.z = self._get_charge_sensor_data(current_voltages, gate1, gate2)
-        allgates = list(range(1, self.num_dots+1))
-        self.all_z = []
-        for (gate1, gate2) in zip(allgates[:-1], allgates[1:]):
-            z = self._get_charge_sensor_data(voltage_centers, gate1, gate2)
-            self.all_z.append(z)
-
-
-        all_images = []
-        voltage_centers = self.device_state["voltage_centers"]
-
-        expected_voltage_shape = (self.num_dots,)
-        
-        if voltage_centers.shape != expected_voltage_shape:
-            raise ValueError(f"Voltage observation shape {voltage_centers.shape} does not match expected {expected_voltage_shape}")
-
-
-        for z in self.all_z:
-            # Extract first channel and normalize for image observation
-            channel_data = z[:, :, 0]  # Shape: (height, width)
-            image_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
-            
-            # Create multi-modal observation dictionary with numpy arrays 
-            all_images.append(image_obs)
-
-        all_images = np.concatenate(all_images, axis=-1)
-        # all_images = all_images.squeeze(-1).transpose(1, 2, 0)
-            
-        # Validate observation structure
-        expected_image_shape = (self.obs_image_size, self.obs_image_size, self.obs_channels)
-
-        if all_images.shape != expected_image_shape:
-            raise ValueError(f"Image observation shape {all_images.shape} does not match expected {expected_image_shape}")
-
-        return {
-            "image": all_images, # creates a multi-channel image with each adjacent pair of voltage sweeps
-            "obs_voltages": voltage_centers
-        }
-
-
     def _get_info(self):
         """
         Helper method to get auxiliary information about the environment's state.
@@ -761,7 +691,7 @@ class QarrayBaseClass(gym.Env):
             }
         }
 
-    def _apply_voltages(self, voltages):
+    def _apply_voltages(self, voltages): # done
         """
         Apply voltage settings to the quantum device.
         
