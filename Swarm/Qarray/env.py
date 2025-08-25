@@ -38,7 +38,7 @@ class QuantumDeviceEnv(gym.Env):
 
         self.num_dots = self.config['simulator']['num_dots']
         self.array = QarrayBaseClass(num_dots=self.num_dots)
-        
+
 
         # --- environment parameters ---
         self.max_steps = self.config['simulator']['max_steps']
@@ -448,3 +448,5 @@ class QuantumDeviceEnv(gym.Env):
 
     def _cleanup(self):
         pass
+
+        
