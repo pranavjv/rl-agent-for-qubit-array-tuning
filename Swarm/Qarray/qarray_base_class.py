@@ -325,7 +325,7 @@ class QarrayBaseClass:
             max_charge_carriers=model_params['max_charge_carriers'],
         )
         return model
-        
+
 
     def _update_virtual_gate_matrix(self, cgd_estimate):
         vgm_core = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)  # (5, 4)
@@ -388,7 +388,7 @@ class QarrayBaseClass:
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=2)
+    experiment = QarrayBaseClass(num_dots=4)
 
     # Test optimal voltage calculation
     gt = experiment._get_ground_truth()
@@ -404,4 +404,4 @@ if __name__ == "__main__":
     print("Barrier voltages shape:", len(obs["obs_barrier_voltages"]))
 
     print(obs["image"].shape)
-    experiment._render_frame(obs["image"][:,:,0])
+    experiment._render_frame(obs["image"][:,:,1])
