@@ -18,9 +18,7 @@ from torch.nn.functional import sigmoid
 from scipy.linalg import block_diag
 
 """
-todo
-
-fix n-dot random param setup
+todo:
 
 add barrier voltages in _get_obs
 """
@@ -145,69 +143,93 @@ class QarrayBaseClass:
         latching = True
 
         cdd_diag = rb["Cdd"]["diagonal"]
-        cdd_nn = rng.uniform(rb["Cdd"]["nearest_neighbor"]["min"], 
-                            rb["Cdd"]["nearest_neighbor"]["max"])
-        cdd_next = rng.uniform(rb["Cdd"]["next_nearest"]["min"], 
-                              rb["Cdd"]["next_nearest"]["max"])  
-        cdd_far = rng.uniform(rb["Cdd"]["furthest"]["min"], 
-                             rb["Cdd"]["furthest"]["max"])
         
+        # Create full Cdd matrix of shape (self.num_dots, self.num_dots)
+        Cdd = np.zeros((self.num_dots, self.num_dots))
+        
+        # Fill the matrix based on distance between dots
+        for i in range(self.num_dots):
+            for j in range(self.num_dots):
+                distance = abs(i - j)
+                
+                if distance == 0:
+                    # Diagonal elements (self-capacitance)
+                    Cdd[i, j] = cdd_diag
+                elif distance == 1:
+                    # Nearest neighbor coupling
+                    Cdd[i, j] = rng.uniform(rb["Cdd"]["nearest_neighbor"]["min"], 
+                                          rb["Cdd"]["nearest_neighbor"]["max"])
+                elif distance == 2:
+                    # Next-nearest neighbor coupling
+                    Cdd[i, j] = rng.uniform(rb["Cdd"]["next_nearest"]["min"], 
+                                          rb["Cdd"]["next_nearest"]["max"])
+                else:
+                    # Furthest neighbor coupling (distance >= 3)
+                    Cdd[i, j] = rng.uniform(rb["Cdd"]["furthest"]["min"], 
+                                          rb["Cdd"]["furthest"]["max"])
 
-        # Create the 4x4 Cdd block
-        Cdd_block = [
-            [cdd_diag, cdd_nn, cdd_next, cdd_far],
-            [cdd_nn, cdd_diag, cdd_nn, cdd_next],
-            [cdd_next, cdd_nn, cdd_diag, cdd_nn],
-            [cdd_far, cdd_next, cdd_nn, cdd_diag]
-        ]
 
-        # Make Cdd a block diagonal matrix of shape (self.num_dots, self.num_dots)
-        num_blocks = self.num_dots // 4
-        Cdd = block_diag(*([Cdd_block] * num_blocks))
-
-
-        # Create the 4x5 Cgd block
-        Cgd_block = [[0.0 for _ in range(5)] for _ in range(4)]
-        # Fill diagonal (primary couplings)
-        for i in range(4):
-            Cgd_block[i][i] = rng.uniform(rb["Cgd"][i][i]["min"], rb["Cgd"][i][i]["max"])
-        # Fill symmetric cross-couplings for plunger gates (gates 0-3)
-        for i in range(4):
-            for j in range(4):
-                if i < j:  # Only fill upper triangle, then mirror
-                    coupling = rng.uniform(rb["Cgd"][i][j]["min"], rb["Cgd"][i][j]["max"])
-                    Cgd_block[i][j] = coupling
-                    Cgd_block[j][i] = coupling
-        # Fill sensor gate couplings (gate 4)
-        for i in range(4):
-            Cgd_block[i][4] = rng.uniform(rb["Cgd"][i][4]["min"], rb["Cgd"][i][4]["max"])
-
-        # Make Cgd a block diagonal matrix of shape (self.num_dots, self.num_dots+1)
-        num_blocks = self.num_dots // 4
-        # block_diag pads with zeros to the right/bottom if blocks are not square, so we need to trim the result
-        Cgd_full = block_diag(*([Cgd_block] * num_blocks))
-        # Cgd_full will be (self.num_dots, num_blocks*5), but we want (self.num_dots, self.num_dots+1)
-        Cgd = Cgd_full[:, :self.num_dots+1]
+        # Create full Cgd matrix of shape (self.num_dots, self.num_dots+1)
+        # num_dots plunger gates + 1 sensor gate
+        Cgd = np.zeros((self.num_dots, self.num_dots + 1))
+        
+        # Fill gate-to-dot couplings for plunger gates (symmetric matrix for first num_dots columns)
+        for dot_i in range(self.num_dots):
+            for gate_j in range(self.num_dots):
+                distance = abs(dot_i - gate_j)
+                
+                if distance == 0:
+                    # Primary coupling (dot to its corresponding gate)
+                    gate_idx_in_config = min(dot_i, 3)  # Use config for first 4 gates
+                    Cgd[dot_i, gate_j] = rng.uniform(rb["Cgd"][gate_idx_in_config][gate_idx_in_config]["min"], 
+                                                   rb["Cgd"][gate_idx_in_config][gate_idx_in_config]["max"])
+                else:
+                    # Cross-coupling based on distance
+                    # Map distance to appropriate config entry (limited to 4x4 config structure)
+                    config_i = min(dot_i, 3)
+                    config_j = min(gate_j, 3)  # Use gate index, not distance
+                    
+                    if config_j < len(rb["Cgd"][config_i]):
+                        Cgd[dot_i, gate_j] = rng.uniform(rb["Cgd"][config_i][config_j]["min"], 
+                                                       rb["Cgd"][config_i][config_j]["max"])
+                    else:
+                        # For gates beyond config, use furthest neighbor values
+                        Cgd[dot_i, gate_j] = rng.uniform(rb["Cgd"][3][3]["min"], 
+                                                       rb["Cgd"][3][3]["max"])
+        
+        # Ensure symmetry for plunger gate submatrix
+        for i in range(self.num_dots):
+            for j in range(i+1, self.num_dots):
+                # Make symmetric by averaging
+                avg_coupling = (Cgd[i, j] + Cgd[j, i]) / 2
+                Cgd[i, j] = avg_coupling
+                Cgd[j, i] = avg_coupling
+        
+        # Fill sensor gate couplings (last column)
+        for dot_i in range(self.num_dots):
+            config_i = min(dot_i, 3)  # Use config for first 4 dots
+            Cgd[dot_i, self.num_dots] = rng.uniform(rb["Cgd"][config_i][4]["min"], 
+                                                  rb["Cgd"][config_i][4]["max"])
 
         Cds = [[rng.uniform(rb["Cds"]["dots"]["min"], rb["Cds"]["dots"]["max"]) for i in range(self.num_dots)]]
         Cgs = [[rng.uniform(rb["Cgs"]["dots"]["min"], rb["Cgs"]["dots"]["max"]) for i in range(self.num_dots)] + [rng.uniform(rb["Cgs"]["sensor"]["min"], rb["Cgs"]["sensor"]["max"])]]
 
-        # Generate 4x4 p_inter matrix for latching model (must be symmetric)
-        p_inter = [[0.0 for _ in range(4)] for _ in range(4)]  # Initialize with zeros
+        # Generate p_inter matrix for latching model (must be symmetric)
+        p_inter = np.zeros((self.num_dots, self.num_dots))
         
         # Fill upper triangle and mirror to lower triangle for symmetry
-        for i in range(4):
-            for j in range(i+1, 4):  # Only fill upper triangle
+        for i in range(self.num_dots):
+            for j in range(i+1, self.num_dots):  # Only fill upper triangle
                 coupling = rng.uniform(rb["latching_model_parameters"]["p_inter"]["min"],
                                      rb["latching_model_parameters"]["p_inter"]["max"])
                 p_inter[i][j] = coupling
                 p_inter[j][i] = coupling  # Ensure symmetry
         # Diagonal elements remain 0.0 (no self-interaction)
         
-        # Generate 4-element p_leads array
+        # Generate p_leads array for all dots
         p_leads = [rng.uniform(rb["latching_model_parameters"]["p_leads"]["min"],
                               rb["latching_model_parameters"]["p_leads"]["max"]) 
-                   for _ in range(4)]
+                   for _ in range(self.num_dots)]
         
         p01 = rng.uniform(rb["telegraph_noise_parameters"]["p01"]["min"], 
                          rb["telegraph_noise_parameters"]["p01"]["max"])
@@ -244,7 +266,7 @@ class QarrayBaseClass:
             },
             "latching_model_parameters": {
                 "Exists": latching,
-                "n_dots": 4,
+                "n_dots": self.num_dots,
                 "p_leads": p_leads,
                 "p_inter": p_inter,
             },
@@ -273,21 +295,11 @@ class QarrayBaseClass:
         latching_params = model_params['latching_model_parameters']
         latching_model = LatchingModel(**{k: v for k, v in latching_params.items() if k != "Exists"}) if latching_params["Exists"] else None
 
-        Cdd_base = model_params['Cdd']
-        Cgd_base = model_params['Cgd']
-        Cds_base = model_params['Cds']
-        Cgs_base = model_params['Cgs']
-
-        model_mats = []
-        for mat in [Cdd_base, Cgd_base]:
-            block_size = np.array(mat).shape[0]
-            num_blocks = self.num_dots // block_size
-            out_mat = block_diag(*([mat]*num_blocks))
-            model_mats.append(out_mat)
-
-        Cdd, Cgd = model_mats
-        Cds = [np.array(Cds_base).flatten().tolist() * (self.num_dots // 4)]
-        Cgs = [np.array(Cgs_base).flatten().tolist() * (self.num_dots // 4)]
+        # Matrices are already the correct size from _gen_random_qarray_params
+        Cdd = model_params['Cdd']
+        Cgd = model_params['Cgd']
+        Cds = model_params['Cds']
+        Cgs = model_params['Cgs']
 
         # print(np.array(Cdd).shape)
         # print(np.array(Cgd).shape)
