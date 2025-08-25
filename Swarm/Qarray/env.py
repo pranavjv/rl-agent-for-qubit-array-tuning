@@ -27,13 +27,11 @@ class QuantumDeviceEnv(gym.Env):
         self.training = training # if we are training or not
 
         self.num_dots = self.config['num_dots']
-        self.qarray = QarrayBaseClass(num_dots=self.num_dots)
+        self.array = QarrayBaseClass(num_dots=self.num_dots)
 
 
         # --- capacitance model ---
         self.capacitance_model = None
-        self.alpha = 0.0
-        self.beta = 0.0
 
         # --- environment parameters ---
         self.max_steps = self.config['simulator']['max_steps']
@@ -127,7 +125,7 @@ class QuantumDeviceEnv(gym.Env):
         center = self._random_center()
 
         # need to recompute the ground truths if we re-randomise qarray params
-        optimal_vg_center = self.qarray.model.optimal_Vg(self.qarray.optimal_VG_center)
+        optimal_vg_center = self.array.model.optimal_Vg(self.array.optimal_VG_center)
         barrier_ground_truth = self._compute_barrier_ground_truth()
 
 
@@ -140,7 +138,7 @@ class QuantumDeviceEnv(gym.Env):
         }
 
         # --- Return the initial observation ---
-        raw_observation = self.qarray._get_obs(self.device_state["current_gate_voltages"], self.device_state["current_barrier_voltages"])
+        raw_observation = self.array._get_obs(self.device_state["current_gate_voltages"], self.device_state["current_barrier_voltages"])
         observation = self._normalise_obs(raw_observation)
 
         info = self._get_info()
@@ -193,12 +191,12 @@ class QuantumDeviceEnv(gym.Env):
             if self.debug:
                 print("Max steps reached")
 
-        if at_target:
+        if np.all(at_target):
             terminated = True
             if self.debug:
                 print("Target reached!")
 
-        raw_observation = self.qarray._get_obs(gate_voltages, barrier_voltages)
+        raw_observation = self.array._get_obs(gate_voltages, barrier_voltages)
         observation = self._normalise_obs(raw_observation)
 
         info = self._get_info()
@@ -243,11 +241,11 @@ class QuantumDeviceEnv(gym.Env):
         gate_rewards -= self.current_step * 0.1
         # we don't give time penalty to the barriers are they are not responsible for navigation
 
-        at_target = np.all(np.abs(gate_ground_truth - current_gate_voltages) <= self.tolerance)
-        if at_target:
-            gate_rewards += 200.0
+        at_target = np.abs(gate_ground_truth - current_gate_voltages) <= self.tolerance
 
-        
+        gate_rewards[at_target] += 200.0
+
+
         rewards = {
             "gates": gate_rewards,
             "barriers": barrier_rewards
@@ -299,8 +297,13 @@ class QuantumDeviceEnv(gym.Env):
         return normalized_obs
 
     
-    def _update_virtual_gate_matrix(self):
-        pass
+    def _update_virtual_gate_matrix(self, obs):
+        image = obs["image"]
+
+        ### update here
+
+        vgm = None
+        self.array._update_virtual_gate_matrix(vgm)
 
 
     def _compute_barrier_ground_truth(self):

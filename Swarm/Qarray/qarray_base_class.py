@@ -314,6 +314,10 @@ class QarrayBaseClass:
         return model
 
 
+    def _update_virtual_gate_matrix(self, vgm):
+        self.model.virtual_gate_matrix = vgm
+
+
     def _render_frame(self, gate1):
         """
         Internal method to create the render image.
