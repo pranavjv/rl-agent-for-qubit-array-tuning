@@ -140,12 +140,12 @@ class QuantumDeviceEnv(gym.Env):
         center = self._random_center()
 
         # need to recompute the ground truths if we re-randomise qarray params
-        optimal_vg_center = self.array.model.optimal_Vg(self.array.optimal_VG_center)
+        plunger_ground_truth = self.array.calculate_ground_truth()
         barrier_ground_truth = self._compute_barrier_ground_truth()
 
 
         self.device_state = {
-            "gate_ground_truth": optimal_vg_center,
+            "gate_ground_truth": plunger_ground_truth,
             "barrier_ground_truth": barrier_ground_truth,
             "current_gate_voltages": center["gates"],
             "current_barrier_voltages": center["barriers"],
