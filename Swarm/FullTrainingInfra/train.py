@@ -160,19 +160,6 @@ def main():
         print(f"Loaded configuration from: {args.config}")
     except FileNotFoundError:
         print(f"Configuration file not found: {args.config}")
-        print("Creating default configuration...")
-        
-        # Create default config and save it
-        from utils.config_loader import create_default_config
-        config = create_default_config()
-        
-        config_path = Path(args.config)
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        loader = ConfigLoader()
-        loader.config = config
-        loader.save_config(args.config)
-        print(f"Default configuration saved to: {args.config}")
     
     # Apply command line overrides
     if args.experiment_name:
