@@ -11,7 +11,7 @@ matplotlib.use('Agg')
 """
 todo:
 
-normalise observations
+scale actions randomly
 """
 
 
@@ -92,6 +92,8 @@ class QuantumDeviceEnv(gym.Env):
 
         self.initial_virtual_gate_matrix = np.eye((self.num_dots, self.num_dots), dtype=np.float32)
 
+        self.reset()
+
 
     def reset(self, seed=None, options=None):
         """
@@ -138,7 +140,9 @@ class QuantumDeviceEnv(gym.Env):
         }
 
         # --- Return the initial observation ---
-        observation = self.qarray._get_obs(self.device_state["current_gate_voltages"], self.device_state["current_barrier_voltages"])
+        raw_observation = self.qarray._get_obs(self.device_state["current_gate_voltages"], self.device_state["current_barrier_voltages"])
+        observation = self._normalise_obs(raw_observation)
+
         info = self._get_info()
 
         return observation, info
@@ -194,7 +198,9 @@ class QuantumDeviceEnv(gym.Env):
             if self.debug:
                 print("Target reached!")
 
-        observation = self.qarray._get_obs(gate_voltages, barrier_voltages)
+        raw_observation = self.qarray._get_obs(gate_voltages, barrier_voltages)
+        observation = self._normalise_obs(raw_observation)
+
         info = self._get_info()
 
         return observation, reward, terminated, truncated, info # note we are returning reward as a dict of lists (one reward per agent)
@@ -255,7 +261,42 @@ class QuantumDeviceEnv(gym.Env):
 
 
     def _normalise_obs(self, obs):
-        pass
+        """
+        Normalize observations from 0 to 1 based on the middle 99% of data.
+        Clips the outer 0.5% to 0 and 1 on either end.
+        
+        Args:
+            obs (dict): Observation dictionary containing 'image' and voltage data
+            
+        Returns:
+            dict: Normalized observation dictionary
+        """
+        assert 'image' in obs, "Image data is required for normalization"
+
+        normalized_obs = obs.copy()
+        
+        # Normalize the image data
+        if 'image' in obs:
+            image_data = obs['image']
+            
+            # Calculate percentiles for the middle 99% of data
+            p_low = np.percentile(image_data, 0.5)   # 0.5th percentile
+            p_high = np.percentile(image_data, 99.5) # 99.5th percentile
+            
+            # Normalize to [0, 1] based on middle 99% range
+            if p_high > p_low:
+                normalized_image = (image_data - p_low) / (p_high - p_low)
+            else:
+                # Handle edge case where all values are the same
+                normalized_image = np.zeros_like(image_data)
+            
+            # Clip to [0, 1] range (this clips the outer 0.5% on each end)
+            normalized_image = np.clip(normalized_image, 0.0, 1.0)
+            
+            # Convert to uint8 range [0, 255] for consistency with observation space
+            normalized_obs['image'] = (normalized_image * 255).astype(np.uint8)
+        
+        return normalized_obs
 
     
     def _update_virtual_gate_matrix(self):
@@ -267,7 +308,22 @@ class QuantumDeviceEnv(gym.Env):
 
     
     def _init_random_action_scaling(self):
-        pass
+        """
+        Initialize random scaling and offset for gate voltages.
+        Each gate voltage dimension gets:
+        - A random scale factor near 1.0 (e.g., 0.8 to 1.2)
+        - A random offset near 0.0 (e.g., -0.1 to 0.1)
+        """
+        if self.training:
+            # Random scale factors near 1.0 (between 0.8 and 1.2)
+            self.action_scale_factor = np.random.uniform(0.8, 1.2, self.num_gate_voltages).astype(np.float32)
+            
+            # Random offsets near 0.0 (between -0.1 and 0.1)
+            self.action_offset = np.random.uniform(-0.1, 0.1, self.num_gate_voltages).astype(np.float32)
+        else:
+            # No scaling during inference
+            self.action_scale_factor = np.ones(self.num_gate_voltages, dtype=np.float32)
+            self.action_offset = np.zeros(self.num_gate_voltages, dtype=np.float32)
 
 
     def _random_center(self):
