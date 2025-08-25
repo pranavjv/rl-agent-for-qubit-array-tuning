@@ -37,8 +37,13 @@ class QuantumDeviceEnv(gym.Env):
         self.config = self._load_config(config_path)
         self.training = training # if we are training or not
 
+        # obs voltage min/max define the range over which we sweep the 2d csd pairs
+        self.obs_voltage_min = self.config['simulator']['measurement']['gate_voltage_sweep_range']['min']
+        self.obs_voltage_max = self.config['simulator']['measurement']['gate_voltage_sweep_range']['max']
+        self.debug = self.config['init']['debug']
         self.num_dots = self.config['simulator']['num_dots']
-        self.array = QarrayBaseClass(num_dots=self.num_dots)
+
+        self.array = QarrayBaseClass(num_dots=self.num_dots, obs_voltage_min=self.obs_voltage_min, obs_voltage_max=self.obs_voltage_max, debug=self.debug)
 
 
         # --- environment parameters ---
@@ -68,9 +73,7 @@ class QuantumDeviceEnv(gym.Env):
             ),
         })
 
-        # obs voltage min/max define the range over which we sweep the 2d csd pairs
-        self.obs_voltage_min = self.config['simulator']['measurement']['gate_voltage_sweep_range']['min']
-        self.obs_voltage_max = self.config['simulator']['measurement']['gate_voltage_sweep_range']['max']
+
 
         self.obs_channels = self.num_dots - 1
         self.obs_normalization_range = [0., 1.]

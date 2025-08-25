@@ -1,5 +1,7 @@
-import gymnasium as gym
-from gymnasium import spaces
+"""
+This file contains the QarrayBaseClass which is used to create a quantum dot array simulator.
+"""
+
 import numpy as np
 import yaml
 import os
@@ -7,15 +9,9 @@ from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingMod
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
-import time
-import matplotlib.pyplot as plt
-import io
-import fcntl
-import json
-from torch.nn.functional import sigmoid
 
-# For block diagonal matrix construction
-from scipy.linalg import block_diag
+import matplotlib.pyplot as plt
+#NOTE: gates are zero indexed but qarray is one indexed
 
 """
 todo:
@@ -24,11 +20,8 @@ add barrier voltages in _get_obs
 """
 
 class QarrayBaseClass:
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
-    
-    def __init__(self, num_dots, config_path='qarray_config.yaml', randomise_actions=True, debug=False, **kwargs):
-
-        print(f'Initialising qarray env with {num_dots} dots ...')
+ 
+    def __init__(self, num_dots, config_path='qarray_config.yaml', obs_voltage_min=-0.5, obs_voltage_max=0.5, debug=False, **kwargs):
 
         # --- Load Configuration ---
         config_path = os.path.join(os.path.dirname(__file__), config_path)
@@ -43,6 +36,10 @@ class QarrayBaseClass:
         
         self.obs_image_size = self.config['simulator']['measurement']['resolution']
         self.obs_channels = self.num_dots - 1
+        
+        # Set voltage scanning range for observations
+        self.obs_voltage_min = obs_voltage_min
+        self.obs_voltage_max = obs_voltage_max
 
         optimal_center_dots = self.config['simulator']['measurement']['optimal_VG_center']['dots']
         optimal_center_sensor = self.config['simulator']['measurement']['optimal_VG_center']['sensor']
@@ -81,24 +78,16 @@ class QarrayBaseClass:
         assert len(gate_voltages) == self.num_dots, f"Incorrect gate voltage shape, expected {self.num_dots}, got {len(gate_voltages)}"
         assert len(barrier_voltages) == self.num_dots - 1, f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
 
-        allgates = list(range(1, self.num_dots+1))
+        allgates = list(range(1, self.num_dots+1))  # Gate numbers for qarray (1-indexed)
         all_z = []
-        for (gate1, gate2) in zip(allgates[:-1], allgates[1:]):
-            voltage1 = gate_voltages[gate1]
-            voltage2 = gate_voltages[gate2]
+        for i, (gate1, gate2) in enumerate(zip(allgates[:-1], allgates[1:])):
+            voltage1 = gate_voltages[i]      # Use 0-based indexing for gate_voltages array
+            voltage2 = gate_voltages[i+1]    # Use 0-based indexing for gate_voltages array
             z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2)
-            all_z.append(z)
+            all_z.append(z[:, :, 0])
 
-
-        all_images = []
-
-        for z in all_z:
-            # Extract first channel
-            channel_data = z[:, :, 0]  # Shape: (height, width)
-            
-            all_images.append(image_obs)
-
-        all_images = np.concatenate(all_images, axis=-1)
+        # Stack images along the channel dimension
+        all_images = np.stack(all_z, axis=-1)
             
         # Validate observation structure
         expected_image_shape = (self.obs_image_size, self.obs_image_size, self.obs_channels)
@@ -113,155 +102,190 @@ class QarrayBaseClass:
         }
     
 
-    def _gen_random_qarray_params(self, rng: np.random.Generator = None):
-        """
-        Generate random parameters for the quantum device.
-        """
-        model_config = self.config['simulator']['model']
-        measurement_config = self.config['simulator']['measurement']
+    def _sample_from_range(self, range_config: dict, rng: np.random.Generator) -> float:
+        """Sample a random value from a min-max range configuration."""
+        return rng.uniform(range_config["min"], range_config["max"])
+    
+    def _get_coupling_by_distance(self, coupling_config: dict, distance: int) -> dict:
+        """Get coupling range configuration based on distance between elements."""
+        if distance == 1:
+            return coupling_config[1]
+        elif distance == 2:
+            return coupling_config[2]
+        else:
+            return coupling_config["3_plus"]
+    
+    def _create_symmetric_matrix(self, size: int, fill_func) -> np.ndarray:
+        """Create a symmetric matrix by filling upper triangle and mirroring."""
+        matrix = np.zeros((size, size))
+        for i in range(size):
+            for j in range(i, size):
+                value = fill_func(i, j)
+                matrix[i, j] = value
+                matrix[j, i] = value
+        return matrix
+    
+    def _generate_cdd_matrix(self, config_ranges: dict, rng: np.random.Generator) -> np.ndarray:
+        """Generate dot-to-dot capacitance matrix with distance-based coupling."""
+        cdd_config = config_ranges["Cdd"]
+        diagonal_val = cdd_config["diagonal"]
+        distance_coupling = cdd_config["distance_coupling"]
+        
+        def fill_cdd(i: int, j: int) -> float:
+            distance = abs(i - j)
+            if distance == 0:
+                return diagonal_val
+            else:
+                coupling_range = self._get_coupling_by_distance(distance_coupling, distance)
+                return self._sample_from_range(coupling_range, rng)
+        
+        return self._create_symmetric_matrix(self.num_dots, fill_cdd)
+    
+    def _generate_cgd_matrix(self, config_ranges: dict, rng: np.random.Generator) -> np.ndarray:
+        """Generate gate-to-dot capacitance matrix with distance-based coupling."""
+        cgd_config = config_ranges["Cgd"]
+        num_gates = self.num_dots + 1  # plunger gates + sensor gate
+        
+        Cgd = np.zeros((self.num_dots, num_gates))
+        
+        # Fill plunger gate couplings
+        for dot_i in range(self.num_dots):
+            for gate_j in range(self.num_dots):
+                distance = abs(dot_i - gate_j)
+                if distance == 0:
+                    # Primary coupling
+                    coupling_range = cgd_config["primary_coupling"]
+                else:
+                    # Cross coupling
+                    coupling_range = self._get_coupling_by_distance(
+                        cgd_config["cross_coupling"], distance
+                    )
+                Cgd[dot_i, gate_j] = self._sample_from_range(coupling_range, rng)
+        
+        # Make plunger gate submatrix symmetric
+        for i in range(self.num_dots):
+            for j in range(i + 1, self.num_dots):
+                avg_coupling = (Cgd[i, j] + Cgd[j, i]) / 2
+                Cgd[i, j] = avg_coupling
+                Cgd[j, i] = avg_coupling
+        
+        # Fill sensor gate couplings (last column)
+        sensor_coupling = cgd_config["sensor_coupling"]
+        for dot_i in range(self.num_dots):
+            Cgd[dot_i, self.num_dots] = self._sample_from_range(sensor_coupling, rng)
+        
+        return Cgd
+    
+    def _generate_sensor_capacitances(self, config_ranges: dict, rng: np.random.Generator) -> tuple:
+        """Generate dot-to-sensor (Cds) and gate-to-sensor (Cgs) capacitances."""
+        # Cds: dot-to-sensor capacitances
+        cds_config = config_ranges["Cds"]["dots"]
+        Cds = [[self._sample_from_range(cds_config, rng) for _ in range(self.num_dots)]]
+        
+        # Cgs: gate-to-sensor capacitances
+        cgs_plunger = config_ranges["Cgs"]["plunger_gates"]
+        cgs_sensor = config_ranges["Cgs"]["sensor_gate"]
+        
+        cgs_values = [self._sample_from_range(cgs_plunger, rng) for _ in range(self.num_dots)]
+        cgs_values.append(self._sample_from_range(cgs_sensor, rng))
+        Cgs = [cgs_values]
+        
+        return Cds, Cgs
+    
+    def _generate_noise_parameters(self, config_ranges: dict, rng: np.random.Generator) -> dict:
+        """Generate white noise and telegraph noise parameters."""
+        # White noise
+        white_noise_amp = self._sample_from_range(config_ranges["white_noise_amplitude"], rng)
+        
+        # Telegraph noise
+        telegraph_config = config_ranges["telegraph_noise_parameters"]
+        p01 = self._sample_from_range(telegraph_config["p01"], rng)
+        p10_factor = self._sample_from_range(telegraph_config["p10_factor"], rng)
+        amplitude = self._sample_from_range(telegraph_config["amplitude"], rng)
+        
+        return {
+            "white_noise_amplitude": white_noise_amp,
+            "telegraph_noise_parameters": {
+                "p01": p01,
+                "p10": p10_factor * p01,
+                "amplitude": amplitude,
+            }
+        }
+    
+    def _generate_latching_parameters(self, config_ranges: dict, rng: np.random.Generator) -> dict:
+        """Generate symmetric latching model parameters."""
+        latching_config = config_ranges["latching_model_parameters"]
+        
+        # Generate p_inter matrix (symmetric, zero diagonal)
+        p_inter_range = latching_config["p_inter"]
+        
+        def fill_p_inter(i: int, j: int) -> float:
+            if i == j:
+                return 0.0  # No self-interaction
+            else:
+                return self._sample_from_range(p_inter_range, rng)
+        
+        p_inter = self._create_symmetric_matrix(self.num_dots, fill_p_inter)
+        
+        # Generate p_leads array
+        p_leads_range = latching_config["p_leads"]
+        p_leads = [self._sample_from_range(p_leads_range, rng) for _ in range(self.num_dots)]
+        
+        return {
+            "Exists": True,
+            "n_dots": self.num_dots,
+            "p_leads": p_leads,
+            "p_inter": p_inter,
+        }
 
+    def _gen_random_qarray_params(self, rng: np.random.Generator = None) -> dict:
+        """
+        Generate random parameters for the quantum device using distance-based coupling rules.
+        
+        Returns:
+            dict: Complete model parameters for qarray simulator
+        """
         if rng is None:
             rng = np.random.default_rng()
 
-        rb = {
+        # Extract configuration ranges
+        model_config = self.config['simulator']['model']
+        measurement_config = self.config['simulator']['measurement']
+        
+        config_ranges = {
             'Cdd': model_config['Cdd'],
-            'Cgd': model_config['Cgd'],
+            'Cgd': model_config['Cgd'], 
             'Cds': model_config['Cds'],
             'Cgs': model_config['Cgs'],
             'white_noise_amplitude': model_config['white_noise_amplitude'],
             'telegraph_noise_parameters': model_config['telegraph_noise_parameters'],
             'latching_model_parameters': model_config['latching_model_parameters'],
             'T': model_config['T'],
-            'coulomb_peak_width': model_config['coulomb_peak_width'],
-            'algorithm': model_config['algorithm'],
-            'implementation': model_config['implementation'],
-            'max_charge_carriers': model_config['max_charge_carriers'],
-            'sensor_gate_voltage': measurement_config['sensor_gate_voltage'],
-            'optimal_VG_center': measurement_config['optimal_VG_center']  # Add this for optimal voltage calculation
+            'coulomb_peak_width': model_config['coulomb_peak_width']
         }
 
-        latching = True
+        # Generate all matrix components using helper methods
+        Cdd = self._generate_cdd_matrix(config_ranges, rng)
+        Cgd = self._generate_cgd_matrix(config_ranges, rng)
+        Cds, Cgs = self._generate_sensor_capacitances(config_ranges, rng)
+        noise_params = self._generate_noise_parameters(config_ranges, rng)
+        latching_params = self._generate_latching_parameters(config_ranges, rng)
 
-        cdd_diag = rb["Cdd"]["diagonal"]
-        
-        # Create full Cdd matrix of shape (self.num_dots, self.num_dots)
-        Cdd = np.zeros((self.num_dots, self.num_dots))
-        
-        # Fill the matrix based on distance between dots
-        for i in range(self.num_dots):
-            for j in range(self.num_dots):
-                distance = abs(i - j)
-                
-                if distance == 0:
-                    # Diagonal elements (self-capacitance)
-                    Cdd[i, j] = cdd_diag
-                elif distance == 1:
-                    # Nearest neighbor coupling
-                    Cdd[i, j] = rng.uniform(rb["Cdd"]["nearest_neighbor"]["min"], 
-                                          rb["Cdd"]["nearest_neighbor"]["max"])
-                elif distance == 2:
-                    # Next-nearest neighbor coupling
-                    Cdd[i, j] = rng.uniform(rb["Cdd"]["next_nearest"]["min"], 
-                                          rb["Cdd"]["next_nearest"]["max"])
-                else:
-                    # Furthest neighbor coupling (distance >= 3)
-                    Cdd[i, j] = rng.uniform(rb["Cdd"]["furthest"]["min"], 
-                                          rb["Cdd"]["furthest"]["max"])
-
-
-        # Create full Cgd matrix of shape (self.num_dots, self.num_dots+1)
-        # num_dots plunger gates + 1 sensor gate
-        Cgd = np.zeros((self.num_dots, self.num_dots + 1))
-        
-        # Fill gate-to-dot couplings for plunger gates (symmetric matrix for first num_dots columns)
-        for dot_i in range(self.num_dots):
-            for gate_j in range(self.num_dots):
-                distance = abs(dot_i - gate_j)
-                
-                if distance == 0:
-                    # Primary coupling (dot to its corresponding gate)
-                    gate_idx_in_config = min(dot_i, 3)  # Use config for first 4 gates
-                    Cgd[dot_i, gate_j] = rng.uniform(rb["Cgd"][gate_idx_in_config][gate_idx_in_config]["min"], 
-                                                   rb["Cgd"][gate_idx_in_config][gate_idx_in_config]["max"])
-                else:
-                    # Cross-coupling based on distance
-                    # Map distance to appropriate config entry (limited to 4x4 config structure)
-                    config_i = min(dot_i, 3)
-                    config_j = min(gate_j, 3)  # Use gate index, not distance
-                    
-                    if config_j < len(rb["Cgd"][config_i]):
-                        Cgd[dot_i, gate_j] = rng.uniform(rb["Cgd"][config_i][config_j]["min"], 
-                                                       rb["Cgd"][config_i][config_j]["max"])
-                    else:
-                        # For gates beyond config, use furthest neighbor values
-                        Cgd[dot_i, gate_j] = rng.uniform(rb["Cgd"][3][3]["min"], 
-                                                       rb["Cgd"][3][3]["max"])
-        
-        # Ensure symmetry for plunger gate submatrix
-        for i in range(self.num_dots):
-            for j in range(i+1, self.num_dots):
-                # Make symmetric by averaging
-                avg_coupling = (Cgd[i, j] + Cgd[j, i]) / 2
-                Cgd[i, j] = avg_coupling
-                Cgd[j, i] = avg_coupling
-        
-        # Fill sensor gate couplings (last column)
-        for dot_i in range(self.num_dots):
-            config_i = min(dot_i, 3)  # Use config for first 4 dots
-            Cgd[dot_i, self.num_dots] = rng.uniform(rb["Cgd"][config_i][4]["min"], 
-                                                  rb["Cgd"][config_i][4]["max"])
-
-        Cds = [[rng.uniform(rb["Cds"]["dots"]["min"], rb["Cds"]["dots"]["max"]) for i in range(self.num_dots)]]
-        Cgs = [[rng.uniform(rb["Cgs"]["dots"]["min"], rb["Cgs"]["dots"]["max"]) for i in range(self.num_dots)] + [rng.uniform(rb["Cgs"]["sensor"]["min"], rb["Cgs"]["sensor"]["max"])]]
-
-        # Generate p_inter matrix for latching model (must be symmetric)
-        p_inter = np.zeros((self.num_dots, self.num_dots))
-        
-        # Fill upper triangle and mirror to lower triangle for symmetry
-        for i in range(self.num_dots):
-            for j in range(i+1, self.num_dots):  # Only fill upper triangle
-                coupling = rng.uniform(rb["latching_model_parameters"]["p_inter"]["min"],
-                                     rb["latching_model_parameters"]["p_inter"]["max"])
-                p_inter[i][j] = coupling
-                p_inter[j][i] = coupling  # Ensure symmetry
-        # Diagonal elements remain 0.0 (no self-interaction)
-        
-        # Generate p_leads array for all dots
-        p_leads = [rng.uniform(rb["latching_model_parameters"]["p_leads"]["min"],
-                              rb["latching_model_parameters"]["p_leads"]["max"]) 
-                   for _ in range(self.num_dots)]
-        
-        p01 = rng.uniform(rb["telegraph_noise_parameters"]["p01"]["min"], 
-                         rb["telegraph_noise_parameters"]["p01"]["max"])
-        
-
+        # Assemble final model parameters
         model_params = {
             "Cdd": Cdd,
             "Cgd": Cgd,
             "Cds": Cds,
             "Cgs": Cgs,
-            "white_noise_amplitude": rng.uniform(rb["white_noise_amplitude"]["min"], 
-                                               rb["white_noise_amplitude"]["max"]),
-            "telegraph_noise_parameters": {
-                "p01": p01,
-                "p10": rng.uniform(rb["telegraph_noise_parameters"]["p10_factor"]["min"], 
-                                 rb["telegraph_noise_parameters"]["p10_factor"]["max"]) * p01,
-                "amplitude": rng.uniform(rb["telegraph_noise_parameters"]["amplitude"]["min"], 
-                                       rb["telegraph_noise_parameters"]["amplitude"]["max"]),
-            },
-            "latching_model_parameters": {
-                "Exists": latching,
-                "n_dots": self.num_dots,
-                "p_leads": p_leads,
-                "p_inter": p_inter,
-            },
-            "T": rng.uniform(rb["T"]["min"], rb["T"]["max"]),
-            "coulomb_peak_width": rng.uniform(rb["coulomb_peak_width"]["min"], 
-                                            rb["coulomb_peak_width"]["max"]),
-            "algorithm": rb["algorithm"],
-            "implementation": rb["implementation"],
-            "max_charge_carriers": rb["max_charge_carriers"],
-            "optimal_VG_center": rb["optimal_VG_center"]
+            "white_noise_amplitude": noise_params["white_noise_amplitude"],
+            "telegraph_noise_parameters": noise_params["telegraph_noise_parameters"],
+            "latching_model_parameters": latching_params,
+            "T": self._sample_from_range(config_ranges['T'], rng),
+            "coulomb_peak_width": self._sample_from_range(config_ranges['coulomb_peak_width'], rng),
+            "algorithm": model_config['algorithm'],
+            "implementation": model_config['implementation'],
+            "max_charge_carriers": model_config['max_charge_carriers'],
+            "optimal_VG_center": measurement_config['optimal_VG_center']
         }
         
         return model_params
@@ -300,18 +324,19 @@ class QarrayBaseClass:
             implementation=model_params['implementation'],
             max_charge_carriers=model_params['max_charge_carriers'],
         )
-
-        model.gate_voltage_composer.virtual_gate_matrix = np.eye(self.num_dots)
-
         return model
-
+        
 
     def _update_virtual_gate_matrix(self, cgd_estimate):
-        vgm = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)
+        vgm_core = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)  # (5, 4)
+        # Pad to square matrix for qarray compatibility
+        num_gates = self.num_dots + 1
+        vgm = np.zeros((num_gates, num_gates))
+        vgm[:num_gates, :self.num_dots] = vgm_core  # Insert (5,4) into (5,5)
         self.model.gate_voltage_composer.virtual_gate_matrix = vgm
 
 
-    def _render_frame(self, gate1):
+    def _render_frame(self, image):
         """
         Internal method to create the render image.
 
@@ -320,29 +345,21 @@ class QarrayBaseClass:
         Returns:
             np.ndarray: RGB array representation of the environment state
         """
-        assert gate1 in range(self.dots - 1)
-
-        z = self.z
+        z = image
 
         vmin, vmax = (self.obs_voltage_min, self.obs_voltage_max)
 
         plt.figure(figsize=(5, 5))
         plt.imshow(z, extent=[vmin, vmax, vmin, vmax], origin='lower', aspect='auto', cmap='viridis')
-        plt.xlabel("$\Delta$PL (V)")
-        plt.ylabel("$\Delta$PR (V)")
-        plt.title("Normalized $|S_{11}|$ (Agent Observation)")
+        plt.xlabel("$\\Delta$PL (V)")
+        plt.ylabel("$\\Delta$PR (V)")
+        plt.title("$|S_{11}|$ (Charge Stability Diagram)")
         plt.axis('equal')
 
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
+        plt.savefig("quantum_dot_plot.png")
+        plt.show()
         plt.close()
 
-        from PIL import Image
-        img = Image.open(buf)
-        img = np.array(img)
-        return img
- 
 
     def _load_config(self, config_path):
         """
@@ -361,21 +378,30 @@ class QarrayBaseClass:
             config = yaml.safe_load(file)
             
         return config
+    
+    def _get_ground_truth(self):
+        """
+        Get the ground truth for the quantum dot array.
+        """
+        return self.model.optimal_Vg(self.optimal_VG_center)[:-1]
+
 
 
 if __name__ == "__main__":
-    import sys
-    env = QarrayBaseClass(num_dots=4, randomise_actions=False)
-    env.reset()
+    experiment = QarrayBaseClass(num_dots=2)
 
-    sys.exit(0)
+    # Test optimal voltage calculation
+    gt = experiment._get_ground_truth()
+    print("Optimal voltages:", gt)
+    
+    # Test getting observations
+    gate_voltages = [0.0] * experiment.num_dots
+    barrier_voltages = [0.0] * experiment.num_barrier_voltages
 
-    gt = env.model.optimal_Vg(env.optimal_VG_center)
-    print(gt)
-    print(env.device_state['voltage_centers'])
-    env.step(gt[1:3])
-    print(env.device_state['voltage_centers'])
-    frame = env._render_frame(inference_plot=True)
-    path = "quantum_dot_plot.png"
-    plt.imsave(path, frame, cmap='viridis')
-    env.close()
+    obs = experiment._get_obs(gt, barrier_voltages)
+    print("Observation shape:", obs["image"].shape)
+    print("Gate voltages shape:", len(obs["obs_gate_voltages"]))
+    print("Barrier voltages shape:", len(obs["obs_barrier_voltages"]))
+
+    print(obs["image"].shape)
+    experiment._render_frame(obs["image"][:,:,0])
