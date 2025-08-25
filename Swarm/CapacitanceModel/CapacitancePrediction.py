@@ -53,7 +53,8 @@ class CapacitancePredictionModel(nn.Module):
             nn.Linear(256, 128),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(128, 3)  # 3 continuous values
+            nn.Linear(128, 3),
+            nn.Sigmoid()  # 3 continuous values
         )
         
         # Confidence head (outputs log variance for uncertainty estimation)

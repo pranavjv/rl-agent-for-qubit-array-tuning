@@ -12,6 +12,10 @@ class CapacitancePredictor:
     and variance of a Gaussian posterior distribution, which is updated using conjugate
     Bayesian inference as new measurements arrive from ML model predictions.
     
+    The class provides direct integration with trained neural networks that output
+    log variance for uncertainty estimation. Use update_from_ml_model() for direct
+    integration with your trained capacitance prediction model.
+    
     Attributes:
         n_dots (int): Number of quantum dots in the array
         means (np.ndarray): N×N matrix of posterior means
@@ -125,37 +129,7 @@ class CapacitancePredictor:
         self.means[j, i] = new_mean
         self.variances[i, j] = new_var
         self.variances[j, i] = new_var
-    
-    def convert_logprobs_to_variance(self, confidence: float) -> float:
-        """
-        Convert ML model confidence (log probabilities) to variance estimate.
-        
-        This is a heuristic conversion that maps confidence scores to measurement
-        uncertainty. Higher confidence (closer to 0) results in lower variance.
-        
-        Args:
-            confidence (float): Confidence score from ML model (typically negative log prob)
-        
-        Returns:
-            float: Estimated variance for the measurement
-        
-        Note:
-            This conversion may need to be calibrated based on your specific ML model.
-            The current implementation uses an exponential mapping.
-        """
-        # Convert negative log probability to variance
-        # Higher confidence (less negative) -> lower variance
-        # This is a heuristic that may need calibration
-        base_variance = 0.01
-        scaling_factor = 10.0
-        
-        # Ensure confidence is treated as negative log probability
-        if confidence > 0:
-            confidence = -confidence
-        
-        variance = base_variance * np.exp(-confidence / scaling_factor)
-        return max(variance, 1e-6)  # Minimum variance threshold
-    
+
     def update_from_scan(self, dot_pair: Tuple[int, int], ml_outputs: List[Tuple[float, float]]):
         """
         Process ML model output for a dot pair scan and update relevant capacitances.
@@ -163,7 +137,7 @@ class CapacitancePredictor:
         Args:
             dot_pair (Tuple[int, int]): The measured dot pair (i, j)
             ml_outputs (List[Tuple[float, float]]): List of 3 tuples containing
-                (capacitance_estimate, confidence) for:
+                (capacitance_estimate, log_variance) for:
                 - C_ij: Capacitance between the measured dots
                 - C_ik: Capacitance between dot i and neighboring dot k
                 - C_jk: Capacitance between dot j and neighboring dot k
@@ -171,7 +145,7 @@ class CapacitancePredictor:
         Example:
             predictor.update_from_scan(
                 dot_pair=(2, 3),
-                ml_outputs=[(0.23, 0.1), (0.18, 0.15), (0.31, 0.08)]
+                ml_outputs=[(0.23, -2.3), (0.18, -1.9), (0.31, -2.5)]
             )
         """
         if len(ml_outputs) != 3:
@@ -180,17 +154,15 @@ class CapacitancePredictor:
         i, j = dot_pair
         
         # First measurement: direct capacitance C_ij
-        estimate_ij, confidence_ij = ml_outputs[0]
-        variance_ij = self.convert_logprobs_to_variance(confidence_ij)
+        estimate_ij, log_var_ij = ml_outputs[0]
+        variance_ij = np.exp(log_var_ij)
         self.bayesian_update(i, j, estimate_ij, variance_ij)
         
         # Second and third measurements: neighboring capacitances
         # We need to determine which neighboring dots these correspond to
-        # This is a simplified approach - in practice, you might need more
-        # sophisticated logic to identify the specific neighboring dots
-        
-        for idx, (estimate, confidence) in enumerate(ml_outputs[1:], 1):
-            variance = self.convert_logprobs_to_variance(confidence)
+
+        for idx, (estimate, log_variance) in enumerate(ml_outputs[1:], 1):
+            variance = np.exp(log_variance)
             
             # Find appropriate neighboring dot pairs
             # This is a heuristic - you may need to modify based on your specific setup
@@ -353,19 +325,18 @@ if __name__ == "__main__":
     
     predictor = CapacitancePredictor(n_dots, prior_dict)
     
-    # Example scan update
-    predictor.update_from_scan(
-        dot_pair=(2, 3),
-        ml_outputs=[(0.23, 0.1), (0.18, 0.15), (0.31, 0.08)]
-    )
+    # Simulating ML model outputs: [Cgd[1,2], Cgd[1,3], Cgd[0,2]]
+    ml_estimates = [0.23, 0.18, 0.31]  # Capacitance predictions
+    log_variances = [-2.3, -1.9, -2.5]  # Log variance from uncertainty head
+    predictor.update_from_scan((1,2), [(ml_estimates[0], log_variances[0]), (ml_estimates[1], log_variances[1]), (ml_estimates[2], log_variances[2])])
     
     # Get specific capacitance stats
-    mean, var = predictor.get_capacitance_stats(2, 3)
-    print(f"C(2,3): mean={mean:.4f}, variance={var:.6f}")
+    mean, var = predictor.get_capacitance_stats(1, 2)
+    print(f"C(1,2): mean={mean:.4f}, variance={var:.6f}")
     
     # Get confidence interval
-    lower, upper = predictor.get_confidence_interval(2, 3)
-    print(f"95% CI for C(2,3): [{lower:.4f}, {upper:.4f}]")
+    lower, upper = predictor.get_confidence_interval(1, 2)
+    print(f"95% CI for C(1,2): [{lower:.4f}, {upper:.4f}]")
     
     # Get full matrix
     full_matrix = predictor.get_full_matrix()
