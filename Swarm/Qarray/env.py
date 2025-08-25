@@ -350,8 +350,9 @@ class QuantumDeviceEnv(gym.Env):
             self.capacitance_model['bayesian_predictor'].update_from_scan((i, i+1), ml_outputs)
         
         # Get updated capacitance matrix and apply to quantum array
-        vgm = self.capacitance_model['bayesian_predictor'].get_full_matrix()
-        self.array._update_virtual_gate_matrix(vgm)
+        cgd_estimate = self.capacitance_model['bayesian_predictor'].get_full_matrix()
+        
+        self.array._update_virtual_gate_matrix(cgd_estimate)
 
 
     def _compute_barrier_ground_truth(self):

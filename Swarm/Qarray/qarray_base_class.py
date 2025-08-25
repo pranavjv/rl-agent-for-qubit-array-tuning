@@ -285,10 +285,7 @@ class QarrayBaseClass:
         Cds = model_params['Cds']
         Cgs = model_params['Cgs']
 
-        # print(np.array(Cdd).shape)
-        # print(np.array(Cgd).shape)
-        # print(np.array(Cds).shape)
-        # print(np.array(Cgs).shape)
+
 
         model = ChargeSensedDotArray(
             Cdd=Cdd,
@@ -309,7 +306,8 @@ class QarrayBaseClass:
         return model
 
 
-    def _update_virtual_gate_matrix(self, vgm):
+    def _update_virtual_gate_matrix(self, cgd_estimate):
+        vgm = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)
         self.model.gate_voltage_composer.virtual_gate_matrix = vgm
 
 
