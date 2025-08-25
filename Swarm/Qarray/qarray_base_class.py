@@ -235,21 +235,6 @@ class QarrayBaseClass:
                          rb["telegraph_noise_parameters"]["p01"]["max"])
         
 
-        # # Generate fixed gate voltages for outer gates (these will be replaced by optimal voltages later)
-        # fixed_gate_voltages = {}
-        # for gate_idx in rb["fixed_gates"]:
-        #     if gate_idx == 4:  # Sensor gate (will be replaced with optimal)
-        #         fixed_gate_voltages[gate_idx] = rng.uniform(
-        #             rb["sensor_gate_voltage"]["min"], 
-        #             rb["sensor_gate_voltage"]["max"]
-        #         )
-        #     else:  # Plunger gates (will be replaced with optimal)
-        #         fixed_gate_voltages[gate_idx] = rng.uniform(
-        #             rb["fixed_gate_voltages"]["min"], 
-        #             rb["fixed_gate_voltages"]["max"]
-        #         )
-        
-
         model_params = {
             "Cdd": Cdd,
             "Cgd": Cgd,
@@ -295,7 +280,6 @@ class QarrayBaseClass:
         latching_params = model_params['latching_model_parameters']
         latching_model = LatchingModel(**{k: v for k, v in latching_params.items() if k != "Exists"}) if latching_params["Exists"] else None
 
-        # Matrices are already the correct size from _gen_random_qarray_params
         Cdd = model_params['Cdd']
         Cgd = model_params['Cgd']
         Cds = model_params['Cds']
@@ -320,14 +304,13 @@ class QarrayBaseClass:
             max_charge_carriers=model_params['max_charge_carriers'],
         )
 
-        # model.gate_voltage_composer.virtual_gate_matrix = self.config['simulator']['virtual_gate_matrix']
-        # TODO update virtual gate matrix
+        model.gate_voltage_composer.virtual_gate_matrix = np.eye(self.num_dots)
 
         return model
 
 
     def _update_virtual_gate_matrix(self, vgm):
-        self.model.virtual_gate_matrix = vgm
+        self.model.gate_voltage_composer.virtual_gate_matrix = vgm
 
 
     def _render_frame(self, gate1):
