@@ -11,14 +11,13 @@ matplotlib.use('Agg')
 """
 todo:
 
-scale actions randomly
 """
 
 
 class QuantumDeviceEnv(gym.Env):
     """
     Simulator environment that handles all env related logic
-    loads in the qarray base model to extract observations
+    loads in the qarray/ device model to extract observations
     """
     def __init__(self, training=True, config_path="env_config.yaml"):
         super().__init__()
