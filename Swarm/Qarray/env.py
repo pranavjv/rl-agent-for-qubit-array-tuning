@@ -3,10 +3,21 @@ from gymnasium import spaces
 import numpy as np
 import yaml
 import os
-from qarray_base_class import QarrayBaseClass
+import sys
+import torch
+from .qarray_base_class import QarrayBaseClass
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
+
+# Import capacitance model components
+try:
+    from ..CapacitanceModel import CapacitancePredictionModel, CapacitancePredictor
+except ImportError:
+    # Fallback for direct execution
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'CapacitanceModel'))
+    from CapacitancePrediction import CapacitancePredictionModel
+    from BayesianUpdater import CapacitancePredictor
 
 """
 todo:
@@ -25,7 +36,7 @@ class QuantumDeviceEnv(gym.Env):
         self.config = self._load_config(config_path)
         self.training = training # if we are training or not
 
-        self.num_dots = self.config['num_dots']
+        self.num_dots = self.config['simulator']['num_dots']
         self.array = QarrayBaseClass(num_dots=self.num_dots)
 
 
@@ -37,8 +48,8 @@ class QuantumDeviceEnv(gym.Env):
         self.tolerance = self.config['simulator']['tolerance']
         self.current_step = 0
 
-        self.num_gate_voltages = num_dots
-        self.num_barrier_voltages = num_dots - 1
+        self.num_plunger_voltages = self.num_dots
+        self.num_barrier_voltages = self.num_dots - 1
         self.gate_voltage_min = self.config['simulator']['measurement']['gate_voltage_range']['min']
         self.gate_voltage_max = self.config['simulator']['measurement']['gate_voltage_range']['max']
         self.barrier_voltage_min = self.config['simulator']['measurement']['barrier_voltage_range']['min']
@@ -48,7 +59,7 @@ class QuantumDeviceEnv(gym.Env):
             'action_gate_voltages': spaces.Box(
                 low=self.gate_voltage_min,
                 high=self.gate_voltage_max,
-                shape=(self.num_gate_voltages,),
+                shape=(self.num_plunger_voltages,),
                 dtype=np.float32
             ),
             'action_barrier_voltages': spaces.Box(
@@ -65,6 +76,7 @@ class QuantumDeviceEnv(gym.Env):
 
         self.obs_channels = self.num_dots - 1
         self.obs_normalization_range = [0., 1.]
+        self.obs_image_size = 64  # Default image size for charge stability diagrams
 
         self.observation_space = spaces.Dict({
             'image': spaces.Box(
@@ -76,7 +88,7 @@ class QuantumDeviceEnv(gym.Env):
             'obs_gate_voltages': spaces.Box(
                 low=self.gate_voltage_min,
                 high=self.gate_voltage_max,
-                shape=(self.num_gate_voltages,),
+                shape=(self.num_plunger_voltages,),
                 dtype=np.float32
             ),
             'obs_barrier_voltages': spaces.Box(
@@ -88,6 +100,9 @@ class QuantumDeviceEnv(gym.Env):
         })
 
         self.initial_virtual_gate_matrix = np.eye((self.num_dots, self.num_dots), dtype=np.float32)
+
+        # Initialize capacitance prediction model
+        self._init_capacitance_model()
 
         self.reset()
 
@@ -225,7 +240,7 @@ class QuantumDeviceEnv(gym.Env):
         current_barrier_voltages = self.device_state["current_barrier_voltages"]
         barrier_distances = np.linalg.norm(barrier_ground_truth - current_barrier_voltages)
 
-        max_gate_distance = self.action_voltage_max - self.action_voltage_min # only gives reward when gt is visible
+        max_gate_distance = self.gate_voltage_max - self.gate_voltage_min # only gives reward when gt is visible
         max_barrier_distance = self.barrier_voltage_max - self.barrier_voltage_min # always gives reward
 
 
@@ -318,21 +333,105 @@ class QuantumDeviceEnv(gym.Env):
         """
         if self.training:
             # Random scale factors near 1.0 (between 0.8 and 1.2)
-            self.action_scale_factor = np.random.uniform(0.8, 1.2, self.num_gate_voltages).astype(np.float32)
+            self.action_scale_factor = np.random.uniform(0.8, 1.2, self.num_plunger_voltages).astype(np.float32)
             
             # Random offsets near 0.0 (between -0.1 and 0.1)
-            self.action_offset = np.random.uniform(-0.1, 0.1, self.num_gate_voltages).astype(np.float32)
+            self.action_offset = np.random.uniform(-0.1, 0.1, self.num_plunger_voltages).astype(np.float32)
         else:
             # No scaling during inference
-            self.action_scale_factor = np.ones(self.num_gate_voltages, dtype=np.float32)
-            self.action_offset = np.zeros(self.num_gate_voltages, dtype=np.float32)
+            self.action_scale_factor = np.ones(self.num_plunger_voltages, dtype=np.float32)
+            self.action_offset = np.zeros(self.num_plunger_voltages, dtype=np.float32)
+
+
+    def _init_capacitance_model(self):
+        """
+        Initialize the capacitance prediction model and Bayesian predictor.
+        
+        This method loads the pre-trained neural network for capacitance prediction
+        and sets up the Bayesian predictor for uncertainty quantification and 
+        posterior tracking of capacitance matrix elements.
+        """
+        try:
+            # Determine device (GPU if available, otherwise CPU)
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            
+            # Initialize the neural network model
+            ml_model = CapacitancePredictionModel()
+            
+            # Load pre-trained weights
+            weights_path = os.path.join(
+                os.path.dirname(__file__), 
+                '..', 
+                'CapacitanceModel', 
+                'test_outputs', 
+                'best_model.pth'
+            )
+            
+            if not os.path.exists(weights_path):
+                raise FileNotFoundError(f"Model weights not found at: {weights_path}")
+            
+            # Load the checkpoint (it contains training metadata)
+            checkpoint = torch.load(weights_path, map_location=device)
+            
+            # Extract model state dict from checkpoint
+            if 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+            else:
+                state_dict = checkpoint
+            
+            ml_model.load_state_dict(state_dict)
+            ml_model.to(device)
+            ml_model.eval()  # Set to evaluation mode
+            
+            # Define distance-based prior configuration for Bayesian predictor
+            def distance_prior(i: int, j: int) -> tuple:
+                """
+                Distance-based prior configuration for capacitance matrix elements.
+                
+                Args:
+                    i, j: Dot indices
+                    
+                Returns:
+                    (prior_mean, prior_variance): Prior distribution parameters
+                """
+                if i == j:
+                    # Self-capacitance (diagonal elements)
+                    return (0.5, 0.05)
+                elif abs(i - j) == 1:
+                    # Nearest neighbors
+                    return (0.25, 0.1)
+                else:
+                    # Distant pairs
+                    return (0.1, 0.2)
+            
+            # Initialize Bayesian predictor
+            bayesian_predictor = CapacitancePredictor(
+                n_dots=self.num_dots,
+                prior_config=distance_prior
+            )
+            
+            # Store both components in the capacitance model
+            self.capacitance_model = {
+                'ml_model': ml_model,
+                'bayesian_predictor': bayesian_predictor,
+                'device': device
+            }
+            
+            print(f"Capacitance model initialized successfully on {device}")
+            print(f"- Neural network: CapacitancePredictionModel")
+            print(f"- Bayesian predictor: {self.num_dots}x{self.num_dots} capacitance matrix")
+            
+        except Exception as e:
+            print(f"Warning: Failed to initialize capacitance model: {e}")
+            print("The environment will continue without capacitance prediction capabilities.")
+            self.capacitance_model = None
 
 
     def _random_center(self):
         """
         Randomly generate a center voltage for the voltage sweep.
         """
-        gate_centers = np.random.uniform(self.gate_voltage_min-self.obs_voltage_min, self.gate_voltage_max-self.obs_voltage_max, self.num_gate_voltages)
+        gate_centers = np.random.uniform(self.gate_voltage_min-self.obs_voltage_min, self.gate_voltage_max-self.obs_voltage_max, self.num_plunger_voltages)
         barrier_centers = np.random.uniform(self.barrier_voltage_min, self.barrier_voltage_max, self.num_barrier_voltages)
         return {
             "gates": gate_centers,
