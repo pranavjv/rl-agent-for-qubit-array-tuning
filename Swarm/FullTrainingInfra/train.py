@@ -17,7 +17,11 @@ sys.path.append(str(current_dir))
 
 from utils.config_loader import ConfigLoader, load_config_from_file
 from utils.wandb_logger import setup_wandb_logging
-from agents.ppo_trainer import PPOTrainer
+from utils.policy_mapping import get_policy_mapping_fn, get_policies_to_train, create_policy_specs
+
+# Add VoltageAgent to path for imports
+sys.path.append(str(current_dir.parent))
+from VoltageAgent import get_trainer_class
 
 
 def setup_environment():
@@ -160,6 +164,7 @@ def main():
         print(f"Loaded configuration from: {args.config}")
     except FileNotFoundError:
         print(f"Configuration file not found: {args.config}")
+        sys.exit(1)
     
     # Apply command line overrides
     if args.experiment_name:
@@ -186,17 +191,29 @@ def main():
         wandb_logger, callback = setup_wandb_logging(config)
         print("W&B logging initialized")
         
-        # Create trainer
-        trainer = PPOTrainer(config, env_class)
-        print("PPO trainer created")
+        # Get trainer class and create instance
+        trainer_type = config.get("trainer_type", "ppo")
+        trainer_class = get_trainer_class(trainer_type)
+        trainer = trainer_class(config, env_class)
+        print(f"{trainer_type.upper()} trainer created")
+        
+        # Create environment instance for policy setup
+        env_instance = env_class()
+        
+        # Setup policies and mapping functions
+        policies = create_policy_specs(env_instance)
+        policy_mapping_fn = get_policy_mapping_fn(args.num_quantum_dots)
+        policies_to_train = get_policies_to_train()
         
         # Setup training configuration
-        ppo_config = trainer.setup_training(args.num_quantum_dots)
+        ppo_config = trainer.setup_training(
+            policies=policies,
+            policy_mapping_fn=policy_mapping_fn,
+            policies_to_train=policies_to_train,
+            callback_class=callback,
+            num_quantum_dots=args.num_quantum_dots
+        )
         print(f"Training configuration setup for {args.num_quantum_dots} quantum dots")
-        
-        # Update callback in configuration
-        ppo_config = ppo_config.callbacks(callback)
-        trainer.ppo_config = ppo_config
         
         # Resume from checkpoint if specified
         if args.resume_from:

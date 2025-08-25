@@ -148,33 +148,35 @@ class MultiModalPPOModel(TorchModelV2, nn.Module):
         return self._value
 
 
-def create_ppo_config(config: Dict[str, Any], env_class: Type, num_quantum_dots: int = 8) -> PPOConfig:
+def create_ppo_config(config: Dict[str, Any], env_class: Type, policies: Dict[str, Any], 
+                     policy_mapping_fn, policies_to_train: list, callback_class, 
+                     num_quantum_dots: int = 8) -> PPOConfig:
     """
     Create PPO configuration for multi-agent training.
     
     Args:
         config: Training configuration dictionary
         env_class: Environment class
+        policies: Policy specifications from FullTrainingInfra
+        policy_mapping_fn: Policy mapping function from FullTrainingInfra
+        policies_to_train: List of policies to train from FullTrainingInfra
+        callback_class: Callback class from FullTrainingInfra
         num_quantum_dots: Number of quantum dots (N)
         
     Returns:
         Configured PPOConfig instance
     """
-    # Import policy mapping utilities
-    from utils.policy_mapping import get_policy_mapping_fn, get_policies_to_train, create_policy_specs
-    from utils.wandb_logger import MultiAgentMetricsCallback
+    from .ppo_config import get_ppo_config
     
     # Register custom model
     ModelCatalog.register_custom_model("multimodal_ppo", MultiModalPPOModel)
     
-    # Create environment instance to get observation/action spaces
-    env_instance = env_class()
-    
-    # Get policy specifications
-    policies = create_policy_specs(env_instance)
+    # Get PPO configuration with any overrides from training config
+    ppo_overrides = config.get("ppo_overrides", {})
+    ppo_config_dict = get_ppo_config(ppo_overrides)
     
     # Configure model for each policy
-    model_config = config["ppo"]["model"].copy()
+    model_config = ppo_config_dict["model"].copy()
     model_config["custom_model"] = "multimodal_ppo"
     
     # Update policies with model config
@@ -189,8 +191,8 @@ def create_ppo_config(config: Dict[str, Any], env_class: Type, num_quantum_dots:
         .environment(env=env_class)
         .multi_agent(
             policies=policies,
-            policy_mapping_fn=get_policy_mapping_fn(num_quantum_dots),
-            policies_to_train=get_policies_to_train(),
+            policy_mapping_fn=policy_mapping_fn,
+            policies_to_train=policies_to_train,
         )
         .rollouts(
             num_rollout_workers=config["ray"]["num_workers"],
@@ -201,17 +203,17 @@ def create_ppo_config(config: Dict[str, Any], env_class: Type, num_quantum_dots:
         .training(
             train_batch_size=config["env"]["train_batch_size"],
             sgd_minibatch_size=config["env"]["sgd_minibatch_size"],
-            num_sgd_iter=config["ppo"]["num_sgd_iter"],
-            lr=config["ppo"]["lr"],
-            lr_schedule=config["ppo"]["lr_schedule"],
-            clip_param=config["ppo"]["clip_param"],
-            vf_clip_param=config["ppo"]["vf_clip_param"],
-            entropy_coeff=config["ppo"]["entropy_coeff"],
-            vf_loss_coeff=config["ppo"]["vf_loss_coeff"],
-            kl_coeff=config["ppo"]["kl_coeff"],
-            kl_target=config["ppo"]["kl_target"],
-            gamma=config["ppo"]["gamma"],
-            lambda_=config["ppo"]["lambda"],
+            num_sgd_iter=ppo_config_dict["num_sgd_iter"],
+            lr=ppo_config_dict["lr"],
+            lr_schedule=ppo_config_dict["lr_schedule"],
+            clip_param=ppo_config_dict["clip_param"],
+            vf_clip_param=ppo_config_dict["vf_clip_param"],
+            entropy_coeff=ppo_config_dict["entropy_coeff"],
+            vf_loss_coeff=ppo_config_dict["vf_loss_coeff"],
+            kl_coeff=ppo_config_dict["kl_coeff"],
+            kl_target=ppo_config_dict["kl_target"],
+            gamma=ppo_config_dict["gamma"],
+            lambda_=ppo_config_dict["lambda"],
             model=model_config,
         )
         .resources(
@@ -219,7 +221,7 @@ def create_ppo_config(config: Dict[str, Any], env_class: Type, num_quantum_dots:
             num_cpus_per_worker=config["ray"]["num_cpus_per_worker"],
             num_gpus_per_worker=config["ray"]["num_gpus_per_worker"],
         )
-        .callbacks(MultiAgentMetricsCallback)
+        .callbacks(callback_class)
         .debugging(seed=config["experiment"]["seed"])
     )
     
@@ -281,9 +283,22 @@ class PPOTrainer:
                 object_store_memory=config["ray"]["object_store_memory"]
             )
     
-    def setup_training(self, num_quantum_dots: int = 8):
-        """Setup training configuration."""
-        self.ppo_config = create_ppo_config(self.config, self.env_class, num_quantum_dots)
+    def setup_training(self, policies: Dict[str, Any], policy_mapping_fn, 
+                      policies_to_train: list, callback_class, num_quantum_dots: int = 8):
+        """
+        Setup training configuration.
+        
+        Args:
+            policies: Policy specifications from FullTrainingInfra
+            policy_mapping_fn: Policy mapping function from FullTrainingInfra
+            policies_to_train: List of policies to train from FullTrainingInfra
+            callback_class: Callback class from FullTrainingInfra
+            num_quantum_dots: Number of quantum dots
+        """
+        self.ppo_config = create_ppo_config(
+            self.config, self.env_class, policies, policy_mapping_fn, 
+            policies_to_train, callback_class, num_quantum_dots
+        )
         return self.ppo_config
     
     def train(self, num_iterations: int = None):

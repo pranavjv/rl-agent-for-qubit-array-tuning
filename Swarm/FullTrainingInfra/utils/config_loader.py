@@ -59,7 +59,6 @@ class ConfigLoader:
             "experiment",
             "env", 
             "multi_agent",
-            "ppo",
             "ray",
             "logging"
         ]
@@ -75,12 +74,11 @@ class ConfigLoader:
             if field not in exp_config:
                 raise ValueError(f"Missing required experiment field: {field}")
         
-        # Validate PPO section
-        ppo_config = self.config["ppo"]
-        required_ppo_fields = ["lr", "gamma", "clip_param"]
-        for field in required_ppo_fields:
-            if field not in ppo_config:
-                raise ValueError(f"Missing required PPO field: {field}")
+        # Validate trainer_type if present
+        if "trainer_type" in self.config:
+            valid_trainers = ["ppo", "ppo_v2", "sac"]
+            if self.config["trainer_type"] not in valid_trainers:
+                raise ValueError(f"Invalid trainer_type: {self.config['trainer_type']}. Must be one of: {valid_trainers}")
         
         # Validate Ray section
         ray_config = self.config["ray"]
@@ -158,3 +156,63 @@ def load_config_from_file(config_path: str) -> Dict[str, Any]:
     """
     loader = ConfigLoader(config_path)
     return loader.load_config()
+
+
+def create_default_config() -> Dict[str, Any]:
+    """
+    Create a default configuration dictionary.
+    
+    Returns:
+        Default configuration
+    """
+    return {
+        "experiment": {
+            "name": "quantum_device_ppo",
+            "project": "qubit-array-tuning",
+            "tags": ["multi-agent", "ppo"],
+            "seed": 42
+        },
+        "trainer_type": "ppo",
+        "env": {
+            "name": "QuantumDeviceEnv",
+            "num_envs": 16,
+            "use_gpu_for_rollouts": False,
+            "rollout_fragment_length": 200,
+            "train_batch_size": 4000,
+            "sgd_minibatch_size": 128
+        },
+        "multi_agent": {
+            "policies": {
+                "plunger_policy": {"obs_space": None, "action_space": None},
+                "barrier_policy": {"obs_space": None, "action_space": None}
+            },
+            "policy_mapping_mode": "by_agent_type"
+        },
+        "ppo_overrides": {},
+        "ray": {
+            "num_gpus": 8,
+            "num_cpus_per_worker": 1,
+            "num_gpus_per_worker": 0.125,
+            "num_workers": 64,
+            "batch_mode": "complete_episodes",
+            "remote_worker_envs": True,
+            "object_store_memory": 10000000000
+        },
+        "logging": {
+            "wandb": {
+                "enabled": True,
+                "api_key_env": "WANDB_API_KEY"
+            },
+            "log_frequency": 10
+        },
+        "checkpointing": {
+            "frequency": 100,
+            "keep_checkpoints_num": 5,
+            "checkpoint_score_attr": "episode_reward_mean"
+        },
+        "stopping_criteria": {
+            "training_iteration": 10000,
+            "episode_reward_mean": 1000,
+            "timesteps_total": 10000000
+        }
+    }
