@@ -68,8 +68,6 @@ simulator:
     #model.optimal_Vg(center) gives the optimal gate voltage in volts from desired charge occupancy
     optimal_VG_center: {"dots": 1.0, "sensor": 0.4}
 
-    sensor_gate_voltage: {"min": 0.5, "max": 1.0}  # Sensor gate typically positive
-
 
 init:
   debug: true

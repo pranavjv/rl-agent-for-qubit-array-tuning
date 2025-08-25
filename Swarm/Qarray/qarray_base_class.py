@@ -18,173 +18,43 @@ from torch.nn.functional import sigmoid
 from scipy.linalg import block_diag
 
 """
-Qarray base class with full randomisation
+todo
 
-supports environment initialisation for both training and inference
+fix n-dot random param setup
+
+add barrier voltages in _get_obs
 """
 
 class QarrayBaseClass:
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
     
-    def __init__(self, num_dots, config_path='qarray_config.yaml', randomise_actions=True, render_mode=None, counter_file=None, **kwargs):
-        assert num_dots % 4 == 0, "Currently we only support multiples of 4 dots"
+    def __init__(self, num_dots, config_path='qarray_config.yaml', randomise_actions=True, debug=False, **kwargs):
+
         print(f'Initialising qarray env with {num_dots} dots ...')
 
         # --- Load Configuration ---
         config_path = os.path.join(os.path.dirname(__file__), config_path)
         self.config = self._load_config(config_path)
 
-        self.debug = self.config['init']['debug']
+        self.debug = self.config['init']['debug'] or debug
         self.seed = self.config['init']['seed']
 
-        # these to be added to the main env.py file
-        # self.max_steps = self.config['env']['max_steps']
-        # self.current_step = 0
-        # self.tolerance = self.config['env']['tolerance']
-
-        optimal_center_dots = self.config['simulator']['measurement']['optimal_VG_center']['dots']
-        optimal_center_sensor = self.config['simulator']['measurement']['optimal_VG_center']['sensor']
-        optimal_VG_center = [optimal_center_dots] * num_dots + [optimal_center_sensor]
-
-        # --- Define Action and Observation Spaces ---
         self.num_dots = num_dots
         self.num_gate_voltages = num_dots
         self.num_barrier_voltages = num_dots - 1
         
         self.obs_image_size = self.config['simulator']['measurement']['resolution']
+        self.obs_channels = self.num_dots - 1
 
-        self._init_random_action_scaling()
+        optimal_center_dots = self.config['simulator']['measurement']['optimal_VG_center']['dots']
+        optimal_center_sensor = self.config['simulator']['measurement']['optimal_VG_center']['sensor']
+        self.optimal_VG_center = [optimal_center_dots] * num_dots + [optimal_center_sensor] # must always call model.optimal_Vg on this
 
-        # --- Initialize Model (one-time setup) ---
+        # --- Initialize Model ---
         self.model = self._load_model()
 
-        self.gate_ground_truth = self.model.optimal_Vg(optimal_VG_center) # only change if we update the model itself
-        self.barrier_ground_truth = None # TODO
 
-        # --- Initialize normalization parameters ---
-        self._init_normalization_params()
-
-    
-    def _init_random_action_scaling(self):
-        """
-        internally scales the action after receiving it from the environment
-        """
-        if self.randomise_actions:
-            self.action_scale_factor = []
-            self.action_offset = []
-            for _ in range(self.num_dots):
-                self.action_scale_factor.append(np.random.uniform(self.config['env']['action_scale_factor']['min'], self.config['env']['action_scale_factor']['max']))
-                action_offset_fraction = np.random.uniform(self.config['env']['action_offset_fraction']['min'], self.config['env']['action_offset_fraction']['max'])
-                self.action_offset.append(action_offset_fraction * (self.obs_voltage_max - self.obs_voltage_min))
-            self.action_scale_factor = np.array(self.action_scale_factor).astype(np.float32)
-            self.action_offset = np.array(self.action_offset).astype(np.float32)
-        else:
-            self.action_scale_factor = np.ones(self.num_dots).astype(np.float32)
-            self.action_offset = np.zeros(self.num_dots).astype(np.float32)
-
-
-    def _init_normalization_params(self):
-        """
-        Initialize adaptive normalization parameters.
-        Start with conservative bounds and update them as new data is encountered.
-        """
-        if self.debug:
-            print("Initializing adaptive normalization parameters...")
-        
-        # Start with conservative bounds based on typical charge sensor data ranges
-        # These will be updated as we encounter actual data
-        self.data_min = 0.13
-        self.data_max = 0.16
-        self.bounds_initialized = False
-        
-        # Track statistics for adaptive updates
-        self.episode_min = float('inf')
-        self.episode_max = float('-inf')
-        self.global_min = float('inf')
-        self.global_max = float('-inf')
-        self.update_count = 0
-        
-        if self.debug:
-            print(f"Initial normalization range: [{self.data_min:.4f}, {self.data_max:.4f}]")
-
-
-    def _update_normalization_bounds(self, raw_data):
-        """
-        Update normalization bounds based on new data encountered.
-        Uses adaptive approach to gradually expand bounds while maintaining stability.
-        
-        Args:
-            raw_data (np.ndarray): Raw charge sensor data
-        """
-        # Update episode statistics
-        self.episode_min = min(self.episode_min, np.min(raw_data))
-        self.episode_max = max(self.episode_max, np.max(raw_data))
-        
-        # Update global statistics
-        self.global_min = min(self.global_min, np.min(raw_data))
-        self.global_max = max(self.global_max, np.max(raw_data))
-        
-        # Check if we need to expand bounds
-        needs_update = False
-        new_min = self.data_min
-        new_max = self.data_max
-        
-        # Expand lower bound if needed (with safety margin)
-        if self.global_min < self.data_min:
-            safety_margin = (self.data_max - self.data_min) * 0.05  # 5% safety margin
-            new_min = self.global_min - safety_margin
-            needs_update = True
-            
-        # Expand upper bound if needed (with safety margin)
-        if self.global_max > self.data_max:
-            safety_margin = (self.data_max - self.data_min) * 0.05  # 5% safety margin
-            new_max = self.global_max + safety_margin
-            needs_update = True
-        
-        # Update bounds if needed
-        if needs_update:
-            self.data_min = new_min
-            self.data_max = new_max
-            self.update_count += 1
-            
-            if self.debug:
-                print(f"Updated normalization bounds to [{self.data_min:.4f}, {self.data_max:.4f}] (update #{self.update_count})")
-
-
-    def _normalize_observation(self, raw_data):
-        """
-        Normalize the raw charge sensor data to the observation space range.
-        Uses adaptive bounds that update as new data is encountered.
-        
-        Args:
-            raw_data (np.ndarray): Raw charge sensor data of shape (height, width)
-            
-        Returns:
-            np.ndarray: Normalized observation of shape (height, width, 1)
-        """
-        # Ensure input is 2D
-        if raw_data.ndim != 2:
-            raise ValueError(f"Expected 2D array, got shape {raw_data.shape}")
-        
-        # Update bounds based on new data
-        self._update_normalization_bounds(raw_data)
-        
-        # Normalize to [0, 1] range
-        normalized = (raw_data - self.data_min) / (self.data_max - self.data_min)
-        
-        # Clip to ensure values are within bounds
-        normalized = np.clip(normalized, 0.0, 1.0)
-        
-        # Scale to uint8 range [0, 255]
-        normalized = (normalized * 255).astype(np.uint8)
-        
-        # Reshape to add channel dimension
-        normalized = normalized.reshape(normalized.shape[0], normalized.shape[1], 1)
-        
-        return normalized
-
-
-    def _get_charge_sensor_data(self, voltages, gate1, gate2):
+    def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2):
         """
         Get charge sensor data for given voltages.
         
@@ -195,267 +65,42 @@ class QarrayBaseClass:
             np.ndarray: Charge sensor data of shape (height, width, channels)
         """
 
-        z, _ = self.device_state["model"].do2d_open(
-            gate1, voltages[0]+self.obs_voltage_min, voltages[0]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
-            gate2, voltages[1]+self.obs_voltage_min, voltages[1]+self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
+        z, _ = self.model.do2d_open(
+            gate1, voltage1 + self.obs_voltage_min, voltage1 + self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
+            gate2, voltage2 + self.obs_voltage_min, voltage2 + self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
         )
         return z
 
 
-    def _reset(self):
-        pass
-
-    
-    # def reset(self, seed=None, options=None): # done
-    #     """
-    #     Resets the environment to an initial state and returns the initial observation.
-
-    #     This method is called at the beginning of each new episode. It should
-    #     reset the state of the environment and return the first observation that
-    #     the agent will see.
-
-    #     Args:
-    #         seed (int, optional): Random seed for reproducibility.
-    #         options (dict, optional): Additional options for reset.
-
-    #     Returns:
-    #         observation (np.ndarray): The initial observation of the space.
-    #         info (dict): A dictionary with auxiliary diagnostic information.
-    #     """
-
-    #     self._increment_global_counter()
-
-    #     # Handle seed if provided
-    #     if seed is not None:
-    #         super().reset(seed=seed)
-    #     else:
-    #         super().reset(seed=None)
-
-    #     # --- Reset the environment's state ---
-    #     self.current_step = 0
-        
-    #     # Reset episode-specific normalization statistics
-    #     self.episode_min = float('inf')
-    #     self.episode_max = float('-inf')
-
-    #     # Initialize episode-specific voltage state
-    #     #random actions scaling
-    #     self._init_random_action_scaling()
-    #     #center of current window
-    #     center = self._random_center()
-
-    #     optimal_VG_center = self.model.optimal_Vg(self.optimal_VG_center)
-
-    #     # Device state variables (episode-specific)
-    #     self.device_state = {
-    #         "model": self.model,
-    #         "gate_ground_truth": optimal_VG_center,
-    #         "barrier_ground_truth": self.barrier_ground_truth,
-    #         "current_gate_voltages": center["gates"],
-    #         "current_barrier_voltages": center["barriers"],
-    #     }
-
-
-    #     # --- Return the initial observation ---
-    #     observation = self._get_obs()
-    #     info = self._get_info() 
-
-    #     return observation, info
-        
-
-    def step(self, action):
-        """
-        Updates the environment state based on the agent's action.
-
-        This method is the core of the environment. It takes an action from the
-        agent and calculates the next state, the reward, and whether the
-        episode has ended.
-
-        Args:
-            action: An action provided by the agent.
-
-        Returns:
-            observation (np.ndarray): The observation of the environment's state.
-            reward (float): The amount of reward returned after previous action.
-            terminated (bool): Whether the episode has ended (e.g., reached a goal).
-            truncated (bool): Whether the episode was cut short (e.g., time limit).
-            info (dict): A dictionary with auxiliary diagnostic information.
-        """
-
-        # --- Update the environment's state based on the action ---
-        self.current_step += 1
-        # action is now a numpy array of shape (num_voltages,) containing voltage values
-
-        # voltages, capacitances = action['action_voltages'], action['capacitances']
-        gate_voltages = action['action_gate_voltages']
-        barrier_voltages = action['action_barrier_voltages']
-
-        if self.debug:
-            print(f'Raw voltage outputs: {gate_voltages, barrier_voltages}')
-
-        # apply random transformation
-        gate_voltages = np.array(gate_voltages).flatten().astype(np.float32)
-        gate_voltages = self.action_scale_factor * gate_voltages + self.action_offset
-
-        barrier_voltages = np.array(barrier_voltages).flatten().astype(np.float32)
-
-        if self.debug:
-            print(f'Scaled voltage outputs: {gate_voltages}')
-
-        self._apply_voltages({"gates": gate_voltages, "barriers": barrier_voltages}) #this step will update the voltages stored in self.device_state
-
-        # --- Determine the reward ---
-        reward = self._get_reward()  #will compare current state to target state
-        if self.debug:
-            print(f"reward: {reward}")
-
-        # --- Check for termination or truncation conditions ---
-        terminated = False
-        truncated = False
-        
-        if self.current_step >= self.max_steps:
-            truncated = True
-            if self.debug:
-                print("Max steps reached")
-        
-        # Check if the centers of the voltage sweeps are aligned
-        ground_truth_center = self.device_state["gate_ground_truth"]
-
-        # Get current voltage settings (what the agent controls)
-        current_voltage_center = self.device_state["current_gate_voltages"]
-
-        # Compare only the first num_voltages dimensions (ignoring last dimension)
-        at_target = np.all(np.abs(ground_truth_center - current_voltage_center) <= self.tolerance)
-        
-        if at_target:
-            terminated = True
-            if self.debug:
-                print("Target voltage sweep center reached")
-
-        # --- Get the new observation and info ---
-        observation = self._get_obs() #new state
-        info = self._get_info() #diagnostic info
-        
-        return observation, reward, terminated, truncated, info
-    
-    def _random_center(self): # done
-        """
-        Randomly generate a center voltage for the voltage sweep.
-        """
-        gate_centers = np.random.uniform(self.gate_voltage_min-self.obs_voltage_min, self.gate_voltage_max-self.obs_voltage_max, self.num_gate_voltages)
-        barrier_centers = np.random.uniform(self.barrier_voltage_min, self.barrier_voltage_max, self.num_barrier_voltages)
-        return {
-            "gates": gate_centers,
-            "barriers": barrier_centers
-        }
-
-    def _get_reward(self, done=None):
-        """
-        Get the reward for the current state.
-
-        Reward is based on the distance from the target voltage sweep center, with maximum reward
-        when the agent aligns the centers of the voltage sweeps. The reward is calculated
-        as: max_possible_distance - current_distance, where max_possible_distance is the maximum
-        possible distance in the along the 1D voltage axis.
-
-        A separate reward is given to each gate and barrier agent.
-
-        The reward is also penalized by the number of steps taken to encourage efficiency.
-        """
-
-        gate_ground_truth = self.device_state["gate_ground_truth"]
-        current_gate_voltages = self.device_state["current_gate_voltages"]
-        gate_distances = np.linalg.norm(gate_ground_truth - current_gate_voltages)
-
-        barrier_ground_truth = self.device_state["barrier_ground_truth"]
-        current_barrier_voltages = self.device_state["current_barrier_voltages"]
-        barrier_distances = np.linalg.norm(barrier_ground_truth - current_barrier_voltages)
-
-        max_gate_distance = self.action_voltage_max - self.action_voltage_min # only gives reward when gt is visible
-        max_barrier_distance = self.barrier_voltage_max - self.barrier_voltage_min # always gives reward
-
-
-        if self.current_step == self.max_steps:
-            gate_rewards = (1 - gate_distances / max_gate_distance) * 100
-            barrier_rewards = (1 - barrier_distances / max_barrier_distance) * 100
-        else:
-            gate_rewards = np.zeros_like(gate_distances)
-            barrier_rewards = np.zeros_like(barrier_distances)
-
-
-        # if self.current_step == self.max_steps:
-        #     # reward = max(max_possible_distance - distance, 0)*0.01
-        #     reward = (1 - gate_distance / max_possible_distance) * 100
-        # else:
-        #     reward = 0.0
-
-        # reward -= self.current_step * 0.1
-
-        gate_rewards -= self.current_step * 0.1
-        # we don't give time penalty to the barriers are they are not responsible for navigation
-
-
-        at_target = np.all(np.abs(ground_truth_center - current_voltage_center) <= self.tolerance)
-        if at_target:
-            reward += 200.0
-
-        if done is not None:
-            prob = sigmoid(done)
-            if prob > self.done_threshold:
-                if at_target:
-                    reward += 100.0
-                else:
-                    reward -= 10.0
-            elif prob <= self.done_threshold:
-                if at_target:
-                    reward -= 100.0
-        
-        rewards = {
-            "gates": gate_rewards,
-            "barriers": barrier_rewards
-        }
-
-        return rewards
-
-
-    def _get_obs(self):
+    def _get_obs(self, gate_voltages, barrier_voltages):
         """
         Helper method to get the current observation of the environment.
         
         Returns a multi-modal observation with image and voltage data as numpy arrays.
         """
-        # Get current voltage configuration
-        # current_voltages = self.device_state["current_voltages"]
-        voltage_centers = self.device_state["voltage_centers"]
-        
-        # Get charge sensor data
-        # self.z = self._get_charge_sensor_data(current_voltages, gate1, gate2)
+        # TODO we are currently not using the barrier voltages
+
+        assert len(gate_voltages) == self.num_dots, f"Incorrect gate voltage shape, expected {self.num_dots}, got {len(gate_voltages)}"
+        assert len(barrier_voltages) == self.num_dots - 1, f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
+
         allgates = list(range(1, self.num_dots+1))
-        self.all_z = []
+        all_z = []
         for (gate1, gate2) in zip(allgates[:-1], allgates[1:]):
-            z = self._get_charge_sensor_data(voltage_centers, gate1, gate2)
-            self.all_z.append(z)
+            voltage1 = gate_voltages[gate1]
+            voltage2 = gate_voltages[gate2]
+            z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2)
+            all_z.append(z)
 
 
         all_images = []
-        voltage_centers = self.device_state["voltage_centers"]
 
-        expected_voltage_shape = (self.num_dots,)
-        
-        if voltage_centers.shape != expected_voltage_shape:
-            raise ValueError(f"Voltage observation shape {voltage_centers.shape} does not match expected {expected_voltage_shape}")
-
-
-        for z in self.all_z:
-            # Extract first channel and normalize for image observation
+        for z in all_z:
+            # Extract first channel
             channel_data = z[:, :, 0]  # Shape: (height, width)
-            image_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
             
-            # Create multi-modal observation dictionary with numpy arrays 
             all_images.append(image_obs)
 
         all_images = np.concatenate(all_images, axis=-1)
-        # all_images = all_images.squeeze(-1).transpose(1, 2, 0)
             
         # Validate observation structure
         expected_image_shape = (self.obs_image_size, self.obs_image_size, self.obs_channels)
@@ -464,13 +109,11 @@ class QarrayBaseClass:
             raise ValueError(f"Image observation shape {all_images.shape} does not match expected {expected_image_shape}")
 
         return {
-            "image": all_images, # creates a multi-channel image with each adjacent pair of voltage sweeps
+            "image": all_images, # unnormalised image
             "obs_gate_voltages": gate_voltages,
             "obs_barrier_voltages": barrier_voltages
         }
     
-    # --- #
-
 
     def _gen_random_qarray_params(self, rng: np.random.Generator = None):
         """
@@ -671,172 +314,38 @@ class QarrayBaseClass:
         return model
 
 
-    def _get_info(self):
-        """
-        Helper method to get auxiliary information about the environment's state.
-
-        Can be used for debugging or logging, but the agent should not use it for learning.
-        """
-        return {
-            "device_state": self.device_state,
-            "current_step": self.current_step,
-            "normalization_range": [self.data_min, self.data_max],
-            "normalization_updates": self.update_count,
-            "global_data_range": [self.global_min, self.global_max],
-            "episode_data_range": [self.episode_min, self.episode_max],
-            "observation_structure": {
-                "image_shape": (self.obs_image_size, self.obs_image_size, self.obs_channels),
-                "voltage_shape": (self.num_dots,),
-                "total_modalities": 2
-            }
-        }
-
-    def _apply_voltages(self, voltages): # done
-        """
-        Apply voltage settings to the quantum device.
-        
-        Args:
-            voltages (np.ndarray): Array of voltage values for each gate
-        """
-        gate_voltages = voltages["gates"]
-        barrier_voltages = voltages["barriers"]
-
-        assert len(gate_voltages) == self.num_gate_voltages, f"Expected voltages to be of size {self.num_gate_voltages}, got {len(gate_voltages)}"
-        assert len(barrier_voltages) == self.num_barrier_voltages, f"Expected voltages to be of size {self.num_barrier_voltages}, got {len(barrier_voltages)}"
-
-        self.device_state["current_voltage_center"] = np.clip(gate_voltages, self.gate_voltage_min, self.gate_voltage_max)
-        self.device_state["current_barrier_voltages"] = np.clip(barrier_voltages, self.barrier_voltage_min, self.barrier_voltage_max)
-         
-
-    def render(self):
-        """
-        Render the environment state.
-        
-        Returns:
-            np.ndarray: RGB array representation of the environment state
-        """
-        if self.render_mode == "rgb_array":
-            return self._render_frame()
-        elif self.render_mode == "human":
-            # For human mode, save the plot and return None
-            self._render_frame()
-            return None
-        else:
-            return None
-
-
-    def _render_frame(self, inference_plot=False):
+    def _render_frame(self, gate1):
         """
         Internal method to create the render image.
 
-        We plot the CSD between gate1 and its successor
+        Returns the CSD scan between gate1 and the next gate
         
         Returns:
             np.ndarray: RGB array representation of the environment state
         """
+        assert gate1 in range(self.dots - 1)
+
         z = self.z
 
-        if inference_plot:
-            vmin, vmax = (self.obs_voltage_min, self.obs_voltage_max)
-
-            plt.figure(figsize=(5, 5))
-            plt.imshow(z, extent=[vmin, vmax, vmin, vmax], origin='lower', aspect='auto', cmap='viridis')
-            plt.xlabel('$Vx$')
-            plt.ylabel('$Vy$')
-            plt.title('$z$')
-            plt.axis('equal')
-            #plt.savefig('test_image.png')
-            #plt.close()
-            #return None
-
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            buf.seek(0)
-            plt.close()
-
-            from PIL import Image
-            img = Image.open(buf)
-            img = np.array(img)
-            return img
-
-        # Get the normalized observation that the agent sees
-        channel_data = z[:, :, 0]  # Shape: (height, width)
-        normalized_obs = self._normalize_observation(channel_data)  # Shape: (height, width, 1)
-        normalized_data = normalized_obs[:, :, 0]  # Remove channel dimension for plotting
-        
-        # Create figure and plot
         vmin, vmax = (self.obs_voltage_min, self.obs_voltage_max)
-        num_ticks = 5
-        tick_values = np.linspace(vmin, vmax, num_ticks)
 
-        fig, ax = plt.subplots(figsize=(8, 6))
-        im = ax.imshow(normalized_data, cmap='viridis', aspect='auto', vmin=0.0, vmax=1.0)
-        
-        # Set x and y axis ticks to correspond to voltage range
-        ax.set_xticks(np.linspace(0, z.shape[1]-1, num_ticks))
-        ax.set_xticklabels([f'{v:.0f}' for v in tick_values])
-        ax.set_yticks(np.linspace(0, z.shape[0]-1, num_ticks))
-        ax.set_yticklabels([f'{v:.0f}' for v in tick_values])
-        
-        ax.set_xlabel("$\Delta$PL (V)")
-        ax.set_ylabel("$\Delta$PR (V)")
-        ax.set_title("Normalized $|S_{11}|$ (Agent Observation)")
-        
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
-        cbar.set_ticklabels([f"{tick:.2f}" for tick in cbar.get_ticks()])
+        plt.figure(figsize=(5, 5))
+        plt.imshow(z, extent=[vmin, vmax, vmin, vmax], origin='lower', aspect='auto', cmap='viridis')
+        plt.xlabel("$\Delta$PL (V)")
+        plt.ylabel("$\Delta$PR (V)")
+        plt.title("Normalized $|S_{11}|$ (Agent Observation)")
+        plt.axis('equal')
 
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        plt.close()
 
-        if self.render_mode == "human":
-            # Save plot for human mode
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            plot_path = os.path.join(script_dir, 'quantum_dot_plot.png')
-            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-            plt.close()
-            print(f"Plot saved as '{plot_path}'")
-            return None
-        else:
-            # Convert to RGB array for rgb_array mode
-            fig.canvas.draw()
-            
-            # Simple approach: save to bytes and load as image
-            try:
-                # Save to bytes buffer
-                buf = io.BytesIO()
-                fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-                buf.seek(0)
-                
-                # Load as image using PIL
-                from PIL import Image
-                img = Image.open(buf)
-                data = np.array(img)
-                
-                # Convert RGBA to RGB if needed
-                if data.shape[-1] == 4:
-                    data = data[:, :, :3]
-                    
-            except Exception as e:
-                print(f"Error getting RGB data from canvas: {e}")
-                # Last resort: create a simple colored array
-                height, width = normalized_data.shape
-                data = np.zeros((height, width, 3), dtype=np.uint8)
-                # Create a simple visualization based on the normalized data
-                data[:, :, 0] = (normalized_data * 255).astype(np.uint8)  # Red channel
-                data[:, :, 1] = (normalized_data * 255).astype(np.uint8)  # Green channel
-                data[:, :, 2] = (normalized_data * 255).astype(np.uint8)  # Blue channel
-            
-            plt.close()
-            return data
+        from PIL import Image
+        img = Image.open(buf)
+        img = np.array(img)
+        return img
  
-
-
-    def close(self):
-        """
-        Performs any necessary cleanup.
-        """
-  
-        pass
-    
 
     def _load_config(self, config_path):
         """

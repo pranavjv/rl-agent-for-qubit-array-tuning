@@ -8,6 +8,12 @@ from qarray_base_class import QarrayBaseClass
 import matplotlib
 matplotlib.use('Agg')
 
+"""
+todo:
+
+normalise observations
+"""
+
 
 class QuantumDeviceEnv(gym.Env):
     """
@@ -23,18 +29,16 @@ class QuantumDeviceEnv(gym.Env):
         self.num_dots = self.config['num_dots']
         self.qarray = QarrayBaseClass(num_dots=self.num_dots)
 
-        self.capacitance_model = None # to add
 
+        # --- capacitance model ---
+        self.capacitance_model = None
+        self.alpha = 0.0
+        self.beta = 0.0
 
         # --- environment parameters ---
         self.max_steps = self.config['simulator']['max_steps']
         self.tolerance = self.config['simulator']['tolerance']
         self.current_step = 0
-
-        optimal_center_dots = self.config['simulator']['measurement']['optimal_VG_center']['dots']
-        optimal_center_sensor = self.config['simulator']['measurement']['optimal_VG_center']['sensor']
-        self.optimal_VG_center = [optimal_center_dots] * num_dots + [optimal_center_sensor]
-        self.barrier_ground_truth = None #TODO
 
         self.num_gate_voltages = num_dots
         self.num_barrier_voltages = num_dots - 1
@@ -86,7 +90,7 @@ class QuantumDeviceEnv(gym.Env):
             )
         })
 
-        self.initial_virtual_gate_matrix = np.zeros((self.num_dots, self.num_dots), dtype=np.float32)
+        self.initial_virtual_gate_matrix = np.eye((self.num_dots, self.num_dots), dtype=np.float32)
 
 
     def reset(self, seed=None, options=None):
@@ -108,7 +112,6 @@ class QuantumDeviceEnv(gym.Env):
 
         self._increment_global_counter()
 
-        # Handle seed if provided
         if seed is not None:
             super().reset(seed=seed)
         else:
@@ -116,45 +119,30 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         self.current_step = 0
-        
-        # Reset episode-specific normalization statistics
-        self.episode_min = float('inf')
-        self.episode_max = float('-inf')
 
-        # Initialize episode-specific voltage state
-        #random actions scaling
-        self.qarray._init_random_action_scaling()
-        #center of current window
-        center = self.qarray._random_center()
+        # --- Get random initial scaling and position ---
+        self._init_random_action_scaling()
+        center = self._random_center()
 
-        # Device state variables (episode-specific)
+        # need to recompute the ground truths if we re-randomise qarray params
+        optimal_vg_center = self.qarray.model.optimal_Vg(self.qarray.optimal_VG_center)
+        barrier_ground_truth = self._compute_barrier_ground_truth()
+
+
         self.device_state = {
+            "gate_ground_truth": optimal_vg_center,
+            "barrier_ground_truth": barrier_ground_truth,
             "current_gate_voltages": center["gates"],
             "current_barrier_voltages": center["barriers"],
             "virtual_gate_matrix": self.initial_virtual_gate_matrix.copy()
         }
 
-
         # --- Return the initial observation ---
-        observation = self.qarray._get_obs()
-        info = self.qarray._get_info()
-
-        # --- reset the base class ---
-        self.qarray._reset()
+        observation = self.qarray._get_obs(self.device_state["current_gate_voltages"], self.device_state["current_barrier_voltages"])
+        info = self._get_info()
 
         return observation, info
 
-
-
-
-
-
-
-    
-    def _update_virtual_gate_matrix(self):
-        pass
-
-    
     
     def step(self, action):
         """
@@ -174,10 +162,8 @@ class QuantumDeviceEnv(gym.Env):
             truncated (bool): Whether the episode was cut short (e.g., time limit).
             info (dict): A dictionary with auxiliary diagnostic information.
         """
-         self.current_step += 1
-        # action is now a numpy array of shape (num_voltages,) containing voltage values
+        self.current_step += 1
 
-        # voltages, capacitances = action['action_voltages'], action['capacitances']
         gate_voltages = action['action_gate_voltages']
         barrier_voltages = action['action_barrier_voltages']
 
@@ -195,7 +181,7 @@ class QuantumDeviceEnv(gym.Env):
         self.device_state["current_barrier_voltages"] = barrier_voltages
 
 
-        reward, at_target = self.qarray._get_reward(gate_voltages, barrier_voltages)
+        reward, at_target = self._get_reward()
         terminated = truncated = False
 
         if self.current_step >= self.max_steps:
@@ -209,9 +195,91 @@ class QuantumDeviceEnv(gym.Env):
                 print("Target reached!")
 
         observation = self.qarray._get_obs(gate_voltages, barrier_voltages)
-        info = self.qarray._get_info()
+        info = self._get_info()
 
-        return observation, reward, terminated, truncated, info
+        return observation, reward, terminated, truncated, info # note we are returning reward as a dict of lists (one reward per agent)
+
+
+    def _get_reward(self):
+        """
+        Get the reward for the current state.
+
+        Reward is based on the distance from the target voltage sweep center, with maximum reward
+        when the agent aligns the centers of the voltage sweeps. The reward is calculated
+        as: max_possible_distance - current_distance, where max_possible_distance is the maximum
+        possible distance in the along the 1D voltage axis.
+
+        A separate reward is given to each gate and barrier agent.
+
+        The reward is also penalized by the number of steps taken to encourage efficiency.
+        """
+
+        gate_ground_truth = self.device_state["gate_ground_truth"]
+        current_gate_voltages = self.device_state["current_gate_voltages"]
+        gate_distances = np.linalg.norm(gate_ground_truth - current_gate_voltages)
+
+        barrier_ground_truth = self.device_state["barrier_ground_truth"]
+        current_barrier_voltages = self.device_state["current_barrier_voltages"]
+        barrier_distances = np.linalg.norm(barrier_ground_truth - current_barrier_voltages)
+
+        max_gate_distance = self.action_voltage_max - self.action_voltage_min # only gives reward when gt is visible
+        max_barrier_distance = self.barrier_voltage_max - self.barrier_voltage_min # always gives reward
+
+
+        if self.current_step == self.max_steps:
+            gate_rewards = (1 - gate_distances / max_gate_distance) * 100
+            barrier_rewards = (1 - barrier_distances / max_barrier_distance) * 100
+        else:
+            gate_rewards = np.zeros_like(gate_distances)
+            barrier_rewards = np.zeros_like(barrier_distances)
+
+        
+        gate_rewards -= self.current_step * 0.1
+        # we don't give time penalty to the barriers are they are not responsible for navigation
+
+        at_target = np.all(np.abs(gate_ground_truth - current_gate_voltages) <= self.tolerance)
+        if at_target:
+            gate_rewards += 200.0
+
+        
+        rewards = {
+            "gates": gate_rewards,
+            "barriers": barrier_rewards
+        }
+
+        return rewards, at_target
+
+
+    def _get_info(self):
+        return {}
+
+
+    def _normalise_obs(self, obs):
+        pass
+
+    
+    def _update_virtual_gate_matrix(self):
+        pass
+
+
+    def _compute_barrier_ground_truth(self):
+        pass
+
+    
+    def _init_random_action_scaling(self):
+        pass
+
+
+    def _random_center(self):
+        """
+        Randomly generate a center voltage for the voltage sweep.
+        """
+        gate_centers = np.random.uniform(self.gate_voltage_min-self.obs_voltage_min, self.gate_voltage_max-self.obs_voltage_max, self.num_gate_voltages)
+        barrier_centers = np.random.uniform(self.barrier_voltage_min, self.barrier_voltage_max, self.num_barrier_voltages)
+        return {
+            "gates": gate_centers,
+            "barriers": barrier_centers
+        }
 
 
     def _load_config(self, config_path):
@@ -222,3 +290,7 @@ class QuantumDeviceEnv(gym.Env):
             config = yaml.safe_load(file)
             
         return config
+
+
+    def _cleanup(self):
+        pass
