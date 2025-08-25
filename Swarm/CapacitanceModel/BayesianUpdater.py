@@ -317,11 +317,13 @@ if __name__ == "__main__":
     for i in range(n_dots):
         for j in range(n_dots):
             if i == j:
-                prior_dict[(i, j)] = (0.5, 0.05)  # Self-capacitance
+                prior_dict[(i, j)] = (1, 0.01)  # Self-capacitance
             elif abs(i - j) == 1:
-                prior_dict[(i, j)] = (0.25, 0.1)  # Nearest neighbors
+                prior_dict[(i, j)] = (0.40, 0.2)  # Nearest neighbors
+            elif abs(i - j) == 2:
+                prior_dict[(i, j)] = (0.2, 0.1)   # Distant pairs
             else:
-                prior_dict[(i, j)] = (0.1, 0.2)   # Distant pairs
+                prior_dict[(i, j)] = (0., 0.1)   # Distant pairs
     
     predictor = CapacitancePredictor(n_dots, prior_dict)
     

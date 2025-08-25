@@ -1,3 +1,4 @@
+from socket import SOL_CAN_BASE
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -77,10 +78,10 @@ class QuantumDeviceEnv(gym.Env):
 
         self.observation_space = spaces.Dict({
             'image': spaces.Box(
-                low=0,
-                high=255,
+                low=0.0,
+                high=1.0,
                 shape=(self.obs_image_size, self.obs_image_size, self.obs_channels),
-                dtype=np.uint8
+                dtype=np.float32
             ),
             'obs_gate_voltages': spaces.Box(
                 low=self.gate_voltage_min,
@@ -147,10 +148,13 @@ class QuantumDeviceEnv(gym.Env):
             "current_barrier_voltages": center["barriers"],
             "virtual_gate_matrix": self.initial_virtual_gate_matrix.copy()
         }
+    
 
         # --- Return the initial observation ---
         raw_observation = self.array._get_obs(self.device_state["current_gate_voltages"], self.device_state["current_barrier_voltages"])
         observation = self._normalise_obs(raw_observation)
+
+        self._update_virtual_gate_matrix(observation)
 
         info = self._get_info()
 
@@ -302,18 +306,51 @@ class QuantumDeviceEnv(gym.Env):
             # Clip to [0, 1] range (this clips the outer 0.5% on each end)
             normalized_image = np.clip(normalized_image, 0.0, 1.0)
             
-            # Convert to uint8 range [0, 255] for consistency with observation space
-            normalized_obs['image'] = (normalized_image * 255).astype(np.uint8)
+            # Keep as float32 in [0, 1] range
+            normalized_obs['image'] = normalized_image.astype(np.float32)
         
         return normalized_obs
-
     
     def _update_virtual_gate_matrix(self, obs):
-        image = obs["image"]
-
-        ### update here
-
-        vgm = None
+        """
+        Update the virtual gate matrix using ML-predicted capacitances from batched scans.
+        
+        This method processes multiple charge stability diagrams (one per dot pair) through 
+        the ML model in a single batch, then updates the Bayesian predictor with the 
+        predictions for each corresponding dot pair.
+        
+        Args:
+            obs (dict): Observation containing 'image' key with multi-channel charge 
+                       stability diagrams of shape (resolution, resolution, num_dots-1)
+        """
+        if self.capacitance_model is None:
+            return  # Skip if capacitance model not available
+            
+        # Get the multi-channel scan: shape (resolution, resolution, num_dots-1)
+        image = obs["image"]  # Each channel is one dot pair's charge stability diagram
+        
+        # Create batch: (num_dots-1, 1, resolution, resolution) 
+        # Convert (height, width, channels) -> (channels, 1, height, width)
+        batch_tensor = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(1).to(self.capacitance_model['device'])
+        
+        # Run ML model on entire batch
+        with torch.no_grad():
+            values, log_vars = self.capacitance_model['ml_model'](batch_tensor)
+        
+        # Update Bayesian predictor for each dot pair
+        # Convert tensors to numpy once
+        values_np = values.cpu().numpy()      # Shape: (num_dots-1, 3)
+        log_vars_np = log_vars.cpu().numpy()  # Shape: (num_dots-1, 3)
+        
+        for i in range(self.num_dots - 1):
+            # Create ml_outputs format expected by update_from_scan
+            ml_outputs = [(float(values_np[i, j]), float(log_vars_np[i, j])) for j in range(3)]
+            
+            # Update the Bayesian predictor for this dot pair
+            self.capacitance_model['bayesian_predictor'].update_from_scan((i, i+1), ml_outputs)
+        
+        # Get updated capacitance matrix and apply to quantum array
+        vgm = self.capacitance_model['bayesian_predictor'].get_full_matrix()
         self.array._update_virtual_gate_matrix(vgm)
 
 
@@ -393,13 +430,15 @@ class QuantumDeviceEnv(gym.Env):
                 """
                 if i == j:
                     # Self-capacitance (diagonal elements)
-                    return (0.5, 0.05)
+                    return (1, 0.01)
                 elif abs(i - j) == 1:
                     # Nearest neighbors
-                    return (0.25, 0.1)
-                else:
+                    return (0.40, 0.2)
+                elif abs(i - j) == 2:
                     # Distant pairs
-                    return (0.1, 0.2)
+                    return (0.2, 0.1)
+                else:
+                    return (0., 0.1)
             
             # Initialize Bayesian predictor
             bayesian_predictor = CapacitancePredictor(
@@ -449,4 +488,9 @@ class QuantumDeviceEnv(gym.Env):
     def _cleanup(self):
         pass
 
-        
+
+if __name__ == "__main__":
+    env = QuantumDeviceEnv()
+    env.reset()
+    print(env.observation_space)
+    print(env.action_space)
