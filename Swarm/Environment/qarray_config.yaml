@@ -76,13 +76,6 @@ simulator:
     max_charge_carriers: 5
 
   measurement:
-    # resolution for simulator images
-    resolution: 128
-    
     #model.optimal_Vg(center) gives the optimal gate voltage in volts from desired charge occupancy
     optimal_VG_center: {"dots": 1.0, "sensor": 0.45}
 
-
-init:
-  debug: true
-  seed: 42

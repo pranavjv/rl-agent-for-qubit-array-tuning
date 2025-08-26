@@ -2,7 +2,7 @@
 # Contains all configs related to the environment and the rl algorithm
 
 simulator:
-  num_dots: 8
+  num_dots: 4
 
   # Max steps in a single training rollout
   max_steps: 50
@@ -17,3 +17,9 @@ simulator:
     gate_voltage_range: {"min": -5.0, "max": 5.0}
     # Total barrier voltage range
     barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO
+    # resolution for simulator images
+    resolution: 128
+
+init:
+  debug: true
+  seed: 42

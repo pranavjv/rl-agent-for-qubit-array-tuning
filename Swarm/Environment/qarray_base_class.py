@@ -21,20 +21,17 @@ add barrier voltages in _get_obs
 
 class QarrayBaseClass:
  
-    def __init__(self, num_dots, config_path='qarray_config.yaml', obs_voltage_min=-0.5, obs_voltage_max=0.5, debug=False, **kwargs):
+    def __init__(self, num_dots, config_path='qarray_config.yaml', obs_voltage_min=-0.5, obs_voltage_max=0.5, obs_image_size=128, debug=False, **kwargs):
 
         # --- Load Configuration ---
         config_path = os.path.join(os.path.dirname(__file__), config_path)
         self.config = self._load_config(config_path)
 
-        self.debug = self.config['init']['debug'] or debug
-        self.seed = self.config['init']['seed']
-
         self.num_dots = num_dots
         self.num_gate_voltages = num_dots
         self.num_barrier_voltages = num_dots - 1
         
-        self.obs_image_size = self.config['simulator']['measurement']['resolution']
+        self.obs_image_size = obs_image_size
         self.obs_channels = self.num_dots - 1
         
         # Set voltage scanning range for observations
@@ -61,8 +58,8 @@ class QarrayBaseClass:
         """
 
         z, _ = self.model.do2d_open(
-            gate1, voltage1 + self.obs_voltage_min, voltage1 + self.obs_voltage_max, self.config['simulator']['measurement']['resolution'],
-            gate2, voltage2 + self.obs_voltage_min, voltage2 + self.obs_voltage_max, self.config['simulator']['measurement']['resolution']
+            gate1, voltage1 + self.obs_voltage_min, voltage1 + self.obs_voltage_max, self.obs_image_size,
+            gate2, voltage2 + self.obs_voltage_min, voltage2 + self.obs_voltage_max, self.obs_image_size
         )
         return z
 
@@ -328,11 +325,8 @@ class QarrayBaseClass:
 
 
     def _update_virtual_gate_matrix(self, cgd_estimate):
-        vgm_core = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)  # (5, 4)
-        # Pad to square matrix for qarray compatibility
-        num_gates = self.num_dots + 1
-        vgm = np.zeros((num_gates, num_gates))
-        vgm[:num_gates, :self.num_dots] = vgm_core  # Insert (5,4) into (5,5)
+        vgm = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)  
+    
         self.model.gate_voltage_composer.virtual_gate_matrix = vgm
 
 
@@ -379,7 +373,7 @@ class QarrayBaseClass:
             
         return config
     
-    def _get_ground_truth(self):
+    def calculate_ground_truth(self):
         """
         Get the ground truth for the quantum dot array.
         """

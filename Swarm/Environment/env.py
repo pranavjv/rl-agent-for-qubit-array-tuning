@@ -42,8 +42,8 @@ class QuantumDeviceEnv(gym.Env):
         self.obs_voltage_max = self.config['simulator']['measurement']['gate_voltage_sweep_range']['max']
         self.debug = self.config['init']['debug']
         self.num_dots = self.config['simulator']['num_dots']
-
-        self.array = QarrayBaseClass(num_dots=self.num_dots, obs_voltage_min=self.obs_voltage_min, obs_voltage_max=self.obs_voltage_max, debug=self.debug)
+        self.obs_image_size = self.config['simulator']['measurement']['resolution']
+        self.array = QarrayBaseClass(num_dots=self.num_dots, obs_voltage_min=self.obs_voltage_min, obs_voltage_max=self.obs_voltage_max, obs_image_size=self.obs_image_size, debug=self.debug)
 
 
         # --- environment parameters ---
@@ -73,11 +73,8 @@ class QuantumDeviceEnv(gym.Env):
             ),
         })
 
-
-
         self.obs_channels = self.num_dots - 1
         self.obs_normalization_range = [0., 1.]
-        self.obs_image_size = 64  # Default image size for charge stability diagrams
 
         self.observation_space = spaces.Dict({
             'image': spaces.Box(
@@ -99,8 +96,6 @@ class QuantumDeviceEnv(gym.Env):
                 dtype=np.float32
             )
         })
-
-        self.initial_virtual_gate_matrix = np.eye((self.num_dots, self.num_dots), dtype=np.float32)
 
         # Initialize capacitance prediction model
         self._init_capacitance_model()
@@ -125,8 +120,6 @@ class QuantumDeviceEnv(gym.Env):
             info (dict): A dictionary with auxiliary diagnostic information.
         """
 
-        self._increment_global_counter()
-
         if seed is not None:
             super().reset(seed=seed)
         else:
@@ -149,7 +142,7 @@ class QuantumDeviceEnv(gym.Env):
             "barrier_ground_truth": barrier_ground_truth,
             "current_gate_voltages": center["gates"],
             "current_barrier_voltages": center["barriers"],
-            "virtual_gate_matrix": self.initial_virtual_gate_matrix.copy()
+            "virtual_gate_matrix": self.array.model.gate_voltage_composer.virtual_gate_matrix
         }
     
 
@@ -217,6 +210,9 @@ class QuantumDeviceEnv(gym.Env):
         raw_observation = self.array._get_obs(gate_voltages, barrier_voltages)
         observation = self._normalise_obs(raw_observation)
 
+        self._update_virtual_gate_matrix(observation)
+        self.device_state["virtual_gate_matrix"] = self.array.model.gate_voltage_composer.virtual_gate_matrix
+
         info = self._get_info()
 
         return observation, reward, terminated, truncated, info # note we are returning reward as a dict of lists (one reward per agent)
@@ -238,11 +234,11 @@ class QuantumDeviceEnv(gym.Env):
 
         gate_ground_truth = self.device_state["gate_ground_truth"]
         current_gate_voltages = self.device_state["current_gate_voltages"]
-        gate_distances = np.linalg.norm(gate_ground_truth - current_gate_voltages)
+        gate_distances = np.abs(gate_ground_truth - current_gate_voltages)  # Element-wise distances
 
         barrier_ground_truth = self.device_state["barrier_ground_truth"]
         current_barrier_voltages = self.device_state["current_barrier_voltages"]
-        barrier_distances = np.linalg.norm(barrier_ground_truth - current_barrier_voltages)
+        barrier_distances = np.abs(barrier_ground_truth - current_barrier_voltages)  # Element-wise distances
 
         max_gate_distance = self.gate_voltage_max - self.gate_voltage_min # only gives reward when gt is visible
         max_barrier_distance = self.barrier_voltage_max - self.barrier_voltage_min # always gives reward
@@ -256,13 +252,12 @@ class QuantumDeviceEnv(gym.Env):
             barrier_rewards = np.zeros_like(barrier_distances)
 
         
-        gate_rewards -= self.current_step * 0.1
-        # we don't give time penalty to the barriers are they are not responsible for navigation
+        gate_rewards = gate_rewards - self.current_step * 0.1
+        barrier_rewards = barrier_rewards - self.current_step * 0.1
 
-        at_target = np.abs(gate_ground_truth - current_gate_voltages) <= self.tolerance
+        at_target = gate_distances <= self.tolerance
 
         gate_rewards[at_target] += 200.0
-
 
         rewards = {
             "gates": gate_rewards,
@@ -359,7 +354,10 @@ class QuantumDeviceEnv(gym.Env):
 
 
     def _compute_barrier_ground_truth(self):
-        pass
+        """
+        Compute barrier ground truth. For now, return zeros since barrier tuning is not implemented.
+        """
+        return np.zeros(self.num_barrier_voltages, dtype=np.float32)
 
     
     def _init_random_action_scaling(self):
@@ -484,6 +482,7 @@ class QuantumDeviceEnv(gym.Env):
             config = yaml.safe_load(file)
             
         return config
+
 
 
     def _cleanup(self):
