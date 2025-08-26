@@ -43,19 +43,26 @@ def setup_environment():
 
 
 def import_environment():
-    """Import the quantum device environment."""
+    """Import the multi-agent quantum device environment wrapper."""
     try:
         # Add Swarm directory to path for package imports
         swarm_dir = current_dir.parent
         if str(swarm_dir) not in sys.path:
             sys.path.insert(0, str(swarm_dir))
         
-        # Import from Environment package
+        # Import multi-agent wrapper and base environment
+        from Environment.multi_agent_wrapper import MultiAgentQuantumWrapper
         from Environment.env import QuantumDeviceEnv
-        return QuantumDeviceEnv
+        
+        # Return factory function that creates wrapped environment
+        def create_wrapped_env(num_quantum_dots=8, **kwargs):
+            base_env = QuantumDeviceEnv(training=True, **kwargs)
+            return MultiAgentQuantumWrapper(base_env, num_quantum_dots=num_quantum_dots)
+        
+        return create_wrapped_env
     except Exception as e:
-        print(f"Failed to import QuantumDeviceEnv: {e}")
-        print("Please ensure the environment is properly set up in Swarm/Environment/env.py")
+        print(f"Failed to import MultiAgentQuantumWrapper: {e}")
+        print("Please ensure the environment is properly set up in Swarm/Environment/")
         sys.exit(1)
 
 
@@ -120,38 +127,47 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def test_environment_setup(env_class, num_quantum_dots: int = 8):
-    """Test environment setup and print information."""
-    print("Testing environment setup...")
+def test_environment_setup(env_instance, num_quantum_dots: int = 8):
+    """Test multi-agent environment setup and print information."""
+    print("Testing multi-agent environment setup...")
     
     try:
-        env = env_class()
         print(f"✓ Environment created successfully")
+        print(f"  Agent IDs: {env_instance.get_agent_ids}")
+        print(f"  Number of agents: {len(env_instance.get_agent_ids)}")
         
         # Test reset
-        obs, info = env.reset()
+        obs, info = env_instance.reset()
         print(f"✓ Environment reset successful")
-        print(f"  Observation keys: {list(obs.keys()) if isinstance(obs, dict) else 'Single observation'}")
+        print(f"  Got observations for {len(obs)} agents")
         
-        # Test step
-        if hasattr(env, 'action_space'):
-            if isinstance(env.action_space, dict):
-                # Multi-agent action space
-                actions = {agent_id: space.sample() for agent_id, space in env.action_space.items()}
-            else:
-                # Single action space
-                actions = env.action_space.sample()
-            
-            obs, rewards, terminated, truncated, info = env.step(actions)
-            print(f"✓ Environment step successful")
-            print(f"  Reward keys: {list(rewards.keys()) if isinstance(rewards, dict) else 'Single reward'}")
+        # Check observation structure for a few agents
+        sample_agents = env_instance.get_agent_ids[:3]  # Check first 3 agents
+        for agent_id in sample_agents:
+            agent_obs = obs[agent_id]
+            print(f"  {agent_id}:")
+            print(f"    Image shape: {agent_obs['image'].shape}")
+            print(f"    Voltage shape: {agent_obs['voltage'].shape}")
         
-        env.close()
-        print("✓ Environment test completed successfully")
+        # Test step with sample actions
+        actions = {}
+        for agent_id in env_instance.get_agent_ids:
+            actions[agent_id] = env_instance.action_space[agent_id].sample()
+        
+        obs, rewards, terminated, truncated, info = env_instance.step(actions)
+        print(f"✓ Environment step successful")
+        print(f"  Got rewards for {len(rewards)} agents")
+        print(f"  Sample rewards: {dict(list(rewards.items())[:3])}")
+        print(f"  Termination status: {terminated[env_instance.get_agent_ids[0]]}")
+        
+        env_instance.close()
+        print("✓ Multi-agent environment test completed successfully")
         return True
         
     except Exception as e:
         print(f"✗ Environment test failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -162,12 +178,14 @@ def main():
     # Setup environment
     setup_environment()
     
-    # Import environment class
-    env_class = import_environment()
+    # Import environment factory function
+    env_factory = import_environment()
     
     # Test environment if requested
     if args.test_env:
-        success = test_environment_setup(env_class, args.num_quantum_dots)
+        # Create test environment instance
+        test_env = env_factory(num_quantum_dots=args.num_quantum_dots)
+        success = test_environment_setup(test_env, args.num_quantum_dots)
         sys.exit(0 if success else 1)
     
     # Load configuration
@@ -218,14 +236,14 @@ def main():
         print("W&B logging initialized")
         
         # Get trainer class and create instance
-        trainer_type = config.get("trainer_type", "recurrent_ppo") # use recurrent by deafult
+        trainer_type = config.get("trainer_type", "recurrent_ppo") # use recurrent by default
         trainer_class = get_trainer_class(trainer_type)
-        trainer = trainer_class(config, env_class)
+        trainer = trainer_class(config, env_factory)
         print(f"{trainer_type.upper()} trainer created")
         
         # Create environment instance for policy setup
-        env_instance = env_class()
-        
+        env_instance = env_factory(num_quantum_dots=args.num_quantum_dots)
+
         # Setup policies and mapping functions
         policies = create_policy_specs(env_instance)
         policy_mapping_fn = get_policy_mapping_fn(args.num_quantum_dots)
