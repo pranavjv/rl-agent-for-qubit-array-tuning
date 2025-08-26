@@ -30,7 +30,7 @@ def setup_environment():
     os.environ['MPLBACKEND'] = 'Agg'
     
     # Add Swarm directory to Python path to import environment
-    swarm_path = current_dir.parent / "Swarm"
+    swarm_path = current_dir.parent
     if swarm_path.exists():
         sys.path.append(str(swarm_path))
     else:
@@ -40,10 +40,17 @@ def setup_environment():
 def import_environment():
     """Import the quantum device environment."""
     try:
-        raise NotImplementedError
-    except NotImplementedError as e:
+        swarm_dir = current_dir.parent
+        env_path = os.path.join(swarm_dir, "Environment", "env.py")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("env", env_path)
+        env_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(env_module)
+        QuantumDeviceEnv = env_module.QuantumDeviceEnv
+        return QuantumDeviceEnv
+    except Exception as e:
         print(f"Failed to import QuantumDeviceEnv: {e}")
-        print("Please ensure the environment is properly set up in Swarm/Qarray/env.py")
+        print("Please ensure the environment is properly set up in Swarm/Environment/env.py")
         sys.exit(1)
 
 

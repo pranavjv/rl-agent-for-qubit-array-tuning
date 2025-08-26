@@ -6,7 +6,9 @@ import yaml
 import os
 import sys
 import torch
-from .qarray_base_class import QarrayBaseClass
+# Import qarray_base_class using absolute import
+sys.path.append(os.path.dirname(__file__))
+from qarray_base_class import QarrayBaseClass
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
@@ -475,6 +477,10 @@ class QuantumDeviceEnv(gym.Env):
 
 
     def _load_config(self, config_path):
+        # Make config path relative to the env.py file directory
+        if not os.path.isabs(config_path):
+            config_path = os.path.join(os.path.dirname(__file__), config_path)
+            
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found: {config_path}")
             
