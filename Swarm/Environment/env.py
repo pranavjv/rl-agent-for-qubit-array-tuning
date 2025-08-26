@@ -482,6 +482,10 @@ class QuantumDeviceEnv(gym.Env):
             config = yaml.safe_load(file)
             
         return config
+    
+    def _render_frame(self, single_scan):
+        self.array._render_frame(single_scan)
+
 
 
 
