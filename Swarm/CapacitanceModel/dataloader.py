@@ -280,25 +280,60 @@ def create_data_loaders(
 
 
 # Image transforms for data augmentation and normalization
+class PercentileNormalize:
+    """
+    Normalize image data using percentile-based normalization to match env.py.
+    
+    Normalizes from 0 to 1 based on the middle 99% of data, 
+    clipping the outer 0.5% to 0 and 1 on either end.
+    """
+    
+    def __call__(self, tensor):
+        """
+        Args:
+            tensor (torch.Tensor): Input tensor of shape (C, H, W) or (H, W)
+            
+        Returns:
+            torch.Tensor: Normalized tensor with values in [0, 1]
+        """
+        # Convert to numpy for percentile calculation
+        data = tensor.numpy()
+        
+        # Calculate percentiles for the middle 99% of data
+        p_low = np.percentile(data, 0.5)   # 0.5th percentile  
+        p_high = np.percentile(data, 99.5) # 99.5th percentile
+        
+        # Normalize to [0, 1] based on middle 99% range
+        if p_high > p_low:
+            normalized = (data - p_low) / (p_high - p_low)
+        else:
+            # Handle edge case where all values are the same
+            normalized = np.zeros_like(data)
+        
+        # Clip to [0, 1] range (this clips the outer 0.5% on each end)
+        normalized = np.clip(normalized, 0.0, 1.0)
+        
+        # Convert back to tensor and ensure float32
+        return torch.from_numpy(normalized).float()
+
+
 def get_transforms(normalize: bool = True):
-    """Get image transforms for preprocessing"""
+    """Get image transforms for preprocessing that match env.py normalization"""
     import torchvision.transforms as transforms
     
     transform_list = []
     
     if normalize:
-        # Normalize based on observed range
-        # Convert to approximately zero mean, unit variance
-        mean = 0.34  # Approximate middle of range
-        std = 0.14   # Approximate std based on range
-        transform_list.append(transforms.Normalize(mean=[mean], std=[std]))
+        # Use percentile-based normalization to match env.py
+        # This normalizes based on middle 99% of data, clipping outer 0.5% on each end
+        transform_list.append(PercentileNormalize())
     
     return transforms.Compose(transform_list) if transform_list else None
 
 
 if __name__ == "__main__":
     # Test the dataset
-    data_dir = "/home/rahul/Summer2025/rl-agent-for-qubit-array-tuning/Swarm/CapacitanceModel/example_dataset"
+    data_dir = "/home/rahul/Summer2025/rl-agent-for-qubit-array-tuning/Swarm/CapacitanceModel/dataset"
     
     print("Testing dataset loading...")
     dataset = CapacitanceDataset(data_dir, load_to_memory=False)

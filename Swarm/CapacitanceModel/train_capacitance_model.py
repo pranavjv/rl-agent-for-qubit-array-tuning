@@ -537,7 +537,7 @@ def main():
     
     # Create data loaders
     print("Creating data loaders...")
-    transform = get_transforms(normalize=False)
+    transform = get_transforms(normalize=True)
     train_loader, val_loader = create_data_loaders(
         data_dir=args.data_dir,
         batch_size=args.batch_size,
