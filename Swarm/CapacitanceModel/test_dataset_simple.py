@@ -3,7 +3,7 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from dataset import CapacitanceDataset, create_data_loaders
+from dataloader import CapacitanceDataset, create_data_loaders
 import os
 
 def save_dataset_samples(data_dir: str, num_samples: int = 12, output_dir: str = "plots"):

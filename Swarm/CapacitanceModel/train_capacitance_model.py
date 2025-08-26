@@ -25,7 +25,7 @@ from scipy import stats
 
 # Local imports
 from CapacitancePrediction import create_model, create_loss_function
-from dataset import create_data_loaders, get_transforms
+from dataloader import create_data_loaders, get_transforms
 
 
 def setup_device() -> torch.device:

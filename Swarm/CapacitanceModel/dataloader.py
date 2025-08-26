@@ -7,12 +7,66 @@ from typing import Tuple, List, Optional
 from sklearn.model_selection import train_test_split
 
 
+def get_channel_targets(channel_idx: int, cgd_matrix: np.ndarray, num_dots: int) -> List[float]:
+    """
+    Get the target CGD values for a specific channel.
+    
+    For each channel (1-indexed as specified):
+    - Channel 0 (image 1): [0, Cgd[1,2], Cgd[1,3]] (Cgd[0,2] doesn't exist, so use 0)
+    - Channel 1 (image 2): [Cgd[2,3], Cgd[2,4], Cgd[1,3]]
+    - Channel 2 (image 3): [Cgd[3,4], Cgd[3,5], Cgd[2,4]]
+    - etc.
+    
+    Args:
+        channel_idx: Channel index (0-indexed)
+        cgd_matrix: CGD matrix of shape (num_dots, num_dots+1)
+        num_dots: Number of dots in the system
+        
+    Returns:
+        List of 3 target values for this channel
+    """
+    # Convert to 1-indexed for the logic as specified
+    channel_1indexed = channel_idx + 1
+    
+    # Calculate the three target indices for this channel (1-indexed)
+    target1_row = channel_1indexed - 1  # Will be -1 for channel 0, which doesn't exist
+    target1_col = channel_1indexed + 1
+    
+    target2_row = channel_1indexed
+    target2_col = channel_1indexed + 1
+    
+    target3_row = channel_1indexed - 1  # Will be -1 for channel 0
+    target3_col = channel_1indexed + 2
+    
+    targets = []
+    
+    # Target 1: Check if indices are valid (convert back to 0-indexed for array access)
+    if target1_row < 0 or target1_row >= num_dots or target1_col >= cgd_matrix.shape[1]:
+        targets.append(0.0)  # Pad with zero if doesn't exist
+    else:
+        targets.append(float(cgd_matrix[target1_row, target1_col]))
+    
+    # Target 2: Check if indices are valid
+    if target2_row >= num_dots or target2_col >= cgd_matrix.shape[1]:
+        targets.append(0.0)
+    else:
+        targets.append(float(cgd_matrix[target2_row, target2_col]))
+    
+    # Target 3: Check if indices are valid
+    if target3_row < 0 or target3_row >= num_dots or target3_col >= cgd_matrix.shape[1]:
+        targets.append(0.0)
+    else:
+        targets.append(float(cgd_matrix[target3_row, target3_col]))
+    
+    return targets
+
+
 class CapacitanceDataset(data.Dataset):
     """
-    PyTorch dataset for loading capacitance images and Cgd targets.
+    PyTorch dataset for loading multi-channel capacitance images and Cgd targets.
     
-    Loads data from batched NPY files containing images and parameters.
-    Extracts Cgd[1,2], Cgd[1,3], and Cgd[0,2] as targets.
+    Loads data from batched NPY files containing multi-channel images and CGD matrices.
+    Each image channel corresponds to different charge sensor measurements with different target CGD values.
     """
     
     def __init__(
@@ -37,14 +91,14 @@ class CapacitanceDataset(data.Dataset):
         
         # Get all batch files
         self.image_files = sorted(glob.glob(os.path.join(data_dir, "images", "batch_*.npy")))
-        self.param_files = sorted(glob.glob(os.path.join(data_dir, "parameters", "batch_*.npy")))
+        self.cgd_files = sorted(glob.glob(os.path.join(data_dir, "cgd_matrices", "batch_*.npy")))
         
-        assert len(self.image_files) == len(self.param_files), \
-            f"Mismatch: {len(self.image_files)} image files vs {len(self.param_files)} param files"
+        assert len(self.image_files) == len(self.cgd_files), \
+            f"Mismatch: {len(self.image_files)} image files vs {len(self.cgd_files)} cgd files"
         
         print(f"Found {len(self.image_files)} batch files")
         
-        # Build index mapping global_idx -> (file_idx, local_idx)
+        # Build index mapping global_idx -> (file_idx, local_idx, channel_idx)
         self._build_index()
         
         if validate_data:
@@ -55,21 +109,25 @@ class CapacitanceDataset(data.Dataset):
             self._load_to_memory()
         
     def _build_index(self):
-        """Build mapping from global index to (batch_file_idx, local_idx)"""
+        """Build mapping from global index to (batch_file_idx, local_idx, channel_idx)"""
         self.index_map = []
         self.batch_sizes = []
         
-        for file_idx, (img_file, param_file) in enumerate(zip(self.image_files, self.param_files)):
-            # Load to get batch size
-            params = np.load(param_file, allow_pickle=True)
-            batch_size = len(params)
+        for file_idx, (img_file, cgd_file) in enumerate(zip(self.image_files, self.cgd_files)):
+            # Load images to get batch size and number of channels
+            images = np.load(img_file, allow_pickle=True)
+            batch_size = images.shape[0]
+            num_channels = images.shape[-1] if len(images.shape) == 4 else 1  # (batch, H, W, channels)
+            
             self.batch_sizes.append(batch_size)
             
+            # Create index entries for each sample and each channel
             for local_idx in range(batch_size):
-                self.index_map.append((file_idx, local_idx))
+                for channel_idx in range(num_channels):
+                    self.index_map.append((file_idx, local_idx, channel_idx))
         
         self.total_samples = len(self.index_map)
-        print(f"Total samples: {self.total_samples}")
+        print(f"Total samples: {self.total_samples} (including all channels)")
         
     def _validate_data(self):
         """Validate data consistency across a few sample batches"""
@@ -80,51 +138,37 @@ class CapacitanceDataset(data.Dataset):
         
         for idx in check_indices:
             img_file = self.image_files[idx]
-            param_file = self.param_files[idx]
+            cgd_file = self.cgd_files[idx]
             
             images = np.load(img_file, allow_pickle=True)
-            params = np.load(param_file, allow_pickle=True)
+            cgd_matrices = np.load(cgd_file, allow_pickle=True)
             
             # Check shapes and structure
-            assert len(images) == len(params), f"Batch {idx}: image/param count mismatch"
-            assert images.ndim == 3, f"Batch {idx}: expected 3D images, got {images.ndim}D"
+            assert len(images) == len(cgd_matrices), f"Batch {idx}: image/cgd count mismatch"
+            assert images.ndim == 4, f"Batch {idx}: expected 4D images (batch, H, W, channels), got {images.ndim}D"
             assert images.shape[1] == images.shape[2], f"Batch {idx}: images not square"
             
-            # Check Cgd structure in first sample
-            sample_params = params[0]
-            assert 'model_params' in sample_params, f"Batch {idx}: missing model_params"
-            assert 'Cgd' in sample_params['model_params'], f"Batch {idx}: missing Cgd"
-            
-            cgd = np.array(sample_params['model_params']['Cgd'])
-            assert cgd.shape[0] >= 4 and cgd.shape[1] >= 4, f"Batch {idx}: Cgd too small {cgd.shape}"
+            # Check CGD matrix structure
+            sample_cgd = cgd_matrices[0]
+            assert sample_cgd.ndim == 2, f"Batch {idx}: expected 2D CGD matrix, got {sample_cgd.ndim}D"
+            assert sample_cgd.shape[0] >= 3, f"Batch {idx}: CGD matrix too small {sample_cgd.shape}"
+            assert sample_cgd.shape[1] >= 3, f"Batch {idx}: CGD matrix too small {sample_cgd.shape}"
             
         print("Data validation passed!")
         
     def _load_to_memory(self):
         """Load all data to memory for faster access"""
         self.memory_images = []
-        self.memory_targets = []
+        self.memory_cgd_matrices = []
         
         for file_idx in range(len(self.image_files)):
             images = np.load(self.image_files[file_idx], allow_pickle=True)
-            params = np.load(self.param_files[file_idx], allow_pickle=True)
-            
-            # Process targets for this batch
-            batch_targets = []
-            for param in params:
-                cgd = np.array(param['model_params']['Cgd'])
-                targets = [cgd[1,2], cgd[1,3], cgd[0,2]]  # Cgd 1,2, Cgd 1,3, Cgd 0,2
-                batch_targets.append(targets)
+            cgd_matrices = np.load(self.cgd_files[file_idx], allow_pickle=True)
             
             self.memory_images.append(images.astype(np.float32))
-            self.memory_targets.append(np.array(batch_targets, dtype=np.float32))
+            self.memory_cgd_matrices.append(cgd_matrices.astype(np.float32))
             
         print("Data loaded to memory!")
-    
-    def _extract_targets(self, param_dict) -> List[float]:
-        """Extract Cgd[1,2], Cgd[1,3], Cgd[0,2] from parameter dictionary"""
-        cgd = np.array(param_dict['model_params']['Cgd'])
-        return [cgd[1,2], cgd[1,3], cgd[0,2]]
     
     def __len__(self):
         return self.total_samples
@@ -137,20 +181,27 @@ class CapacitanceDataset(data.Dataset):
             image: (1, H, W) tensor
             targets: (3,) tensor containing [Cgd_1_2, Cgd_1_3, Cgd_0_2]
         """
-        file_idx, local_idx = self.index_map[idx]
+        file_idx, local_idx, channel_idx = self.index_map[idx]
         
         if self.load_to_memory:
             # Load from memory
-            image = self.memory_images[file_idx][local_idx]
-            targets = self.memory_targets[file_idx][local_idx]
+            full_image = self.memory_images[file_idx][local_idx]  # Shape: (H, W, channels)
+            cgd_matrix = self.memory_cgd_matrices[file_idx][local_idx]  # Shape: (num_dots, num_dots+1)
         else:
             # Load from disk
             images = np.load(self.image_files[file_idx], allow_pickle=True)
-            params = np.load(self.param_files[file_idx], allow_pickle=True)
+            cgd_matrices = np.load(self.cgd_files[file_idx], allow_pickle=True)
             
-            image = images[local_idx].astype(np.float32)
-            targets = self._extract_targets(params[local_idx])
-            targets = np.array(targets, dtype=np.float32)
+            full_image = images[local_idx].astype(np.float32)  # Shape: (H, W, channels)
+            cgd_matrix = cgd_matrices[local_idx].astype(np.float32)  # Shape: (num_dots, num_dots+1)
+        
+        # Extract single channel from the multi-channel image
+        image = full_image[:, :, channel_idx]  # Shape: (H, W)
+        
+        # Get targets for this specific channel
+        num_dots = cgd_matrix.shape[0]
+        targets = get_channel_targets(channel_idx, cgd_matrix, num_dots)
+        targets = np.array(targets, dtype=np.float32)
         
         # Convert to torch tensors
         image = torch.from_numpy(image).unsqueeze(0)  # Add channel dimension (1, H, W)
@@ -247,7 +298,7 @@ def get_transforms(normalize: bool = True):
 
 if __name__ == "__main__":
     # Test the dataset
-    data_dir = "/home/rahul/Summer2025/rl-agent-for-qubit-array-tuning/Swarm/Qarray/example_dataset"
+    data_dir = "/home/rahul/Summer2025/rl-agent-for-qubit-array-tuning/Swarm/CapacitanceModel/example_dataset"
     
     print("Testing dataset loading...")
     dataset = CapacitanceDataset(data_dir, load_to_memory=False)
