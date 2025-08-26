@@ -457,10 +457,7 @@ class QuantumDeviceEnv(gym.Env):
                 'device': device
             }
             
-            print(f"Capacitance model initialized successfully on {device}")
-            print(f"- Neural network: CapacitancePredictionModel")
-            print(f"- Bayesian predictor: {self.num_dots}x{self.num_dots} capacitance matrix")
-            
+
         except Exception as e:
             print(f"Warning: Failed to initialize capacitance model: {e}")
             print("The environment will continue without capacitance prediction capabilities.")
