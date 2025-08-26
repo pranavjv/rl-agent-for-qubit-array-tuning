@@ -7,12 +7,16 @@ be easily switched based on configuration.
 """
 
 from .ppo_trainer import PPOTrainer, MultiModalPPOModel, create_ppo_config
+from .ppo_trainer_recurrent import RecurrentPPOTrainer, MultiModalRecurrentPPOModel, create_recurrent_ppo_config
 from .ppo_config import get_default_ppo_config, get_ppo_config
 
 __all__ = [
     'PPOTrainer',
     'MultiModalPPOModel', 
     'create_ppo_config',
+    'RecurrentPPOTrainer',
+    'MultiModalRecurrentPPOModel',
+    'create_recurrent_ppo_config',
     'get_default_ppo_config',
     'get_ppo_config',
     'get_trainer_class'
@@ -37,6 +41,7 @@ def get_trainer_class(trainer_type: str = 'ppo'):
     """
     trainer_map = {
         'ppo': PPOTrainer,
+        'recurrent_ppo': RecurrentPPOTrainer,
         # Future implementations:
         # 'ppo_v2': PPOTrainerV2,
         # 'sac': SACTrainer,

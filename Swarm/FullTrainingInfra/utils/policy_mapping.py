@@ -102,16 +102,20 @@ def create_policy_specs(env_instance) -> Dict[str, Any]:
         barrier_action_space = action_space
     
     policies = {
-        "plunger_policy": {
-            "observation_space": plunger_obs_space,
-            "action_space": plunger_action_space,
-        },
-        "barrier_policy": {
-            "observation_space": barrier_obs_space,
-            "action_space": barrier_action_space,
-        }
+        "plunger_policy": (
+            None,  # Use default policy class
+            plunger_obs_space,
+            plunger_action_space,
+            {}  # Empty config - will be populated by trainer
+        ),
+        "barrier_policy": (
+            None,  # Use default policy class
+            barrier_obs_space,
+            barrier_action_space,
+            {}  # Empty config - will be populated by trainer
+        )
     }
-    
+
     return policies
 
 

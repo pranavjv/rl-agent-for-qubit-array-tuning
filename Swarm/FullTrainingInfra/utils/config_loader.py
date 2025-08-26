@@ -76,7 +76,7 @@ class ConfigLoader:
         
         # Validate trainer_type if present
         if "trainer_type" in self.config:
-            valid_trainers = ["ppo", "ppo_v2", "sac"]
+            valid_trainers = ["ppo", "ppo_v2", "sac", "recurrent_ppo"]
             if self.config["trainer_type"] not in valid_trainers:
                 raise ValueError(f"Invalid trainer_type: {self.config['trainer_type']}. Must be one of: {valid_trainers}")
         

@@ -6,16 +6,16 @@ experiment:
   seed: 42
 
 # Trainer Configuration
-trainer_type: "ppo"  # Options: ppo, ppo_v2, sac (when implemented)
+trainer_type: "recurrent_ppo"  # Options: ppo, recurrent_ppo, ppo_v2, sac (when implemented)
 
 # Environment Configuration
 env:
   name: "QuantumDeviceEnv"
   num_envs: 16  # Number of parallel environments
   use_gpu_for_rollouts: false  # Switch between GPU/CPU for environment rollouts
-  rollout_fragment_length: 200
-  train_batch_size: 4000
-  sgd_minibatch_size: 128
+  rollout_fragment_length: 125
+  train_batch_size: 2000
+  mini_batch_size: 128
 
 # Multi-Agent Configuration
 multi_agent:
@@ -45,11 +45,12 @@ ray:
   num_gpus: 8
   num_cpus_per_worker: 1
   num_gpus_per_worker: 0.125  # 8 workers per GPU
-  num_workers: 64  # Total number of rollout workers
+  num_workers: 16  # num_env_runners
+  num_envs_per_env_runner: 1
   
   # Advanced Ray settings
   batch_mode: "complete_episodes"
-  remote_worker_envs: true
+  remote_worker_envs: false
   remote_env_batch_wait_ms: 0
   
   # Memory and performance
@@ -92,4 +93,4 @@ stopping_criteria:
 evaluation:
   evaluation_interval: 50
   evaluation_duration: 10  # Number of episodes for evaluation
-  evaluation_parallel_to_training: true 
+  evaluation_parallel_to_training: false # set to true with `evaluation_num_env_runners > 0`

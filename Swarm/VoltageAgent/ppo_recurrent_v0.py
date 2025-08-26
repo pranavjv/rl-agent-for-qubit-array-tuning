@@ -6,11 +6,11 @@ Handles distributed training, policy configuration, and model setup.
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
-from ray.rllib.core.rl_module.rl_module import RLModule
-from ray.rllib.core.rl_module.torch import TorchRLModule
+from ray.rllib.models import ModelCatalog
+from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
+from ray.rllib.models.torch.fcnet import FullyConnectedNetwork
 from ray.rllib.utils.framework import try_import_torch
-from ray.rllib.utils.typing import TensorType
-from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 import gymnasium as gym
 from gymnasium import spaces
 from typing import Dict, Any, Optional, Type
@@ -19,23 +19,22 @@ import numpy as np
 torch, nn = try_import_torch()
 
 
-class MultiModalRecurrentPPOModel(TorchRLModule):
+class MultiModalRecurrentPPOModel(RecurrentNetwork, nn.Module):
     """
-    Multi-modal RLModule with LSTM memory using the new RLModule API.
+    Base class for multi-modal PPO models with LSTM memory.
     """
     
-    def __init__(self, config: Dict[str, Any]):
-        super().__init__(config)
-        
-        # Extract spaces from config
-        obs_space = config["observation_space"]
-        action_space = config["action_space"]
-        model_config = config.get("model_config", {})
+    def __init__(self, obs_space: gym.Space, action_space: gym.Space, num_outputs: int,
+                 model_config: Dict[str, Any], name: str):
+        RecurrentNetwork.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
         
         # LSTM configuration
         self.lstm_cell_size = model_config.get("lstm_cell_size", 128)
         self.use_prev_action = model_config.get("lstm_use_prev_action", False)
         self.use_prev_reward = model_config.get("lstm_use_prev_reward", False)
+        
+        self.model_config = model_config
         
         # Parse observation space
         if isinstance(obs_space, spaces.Dict):
@@ -45,12 +44,6 @@ class MultiModalRecurrentPPOModel(TorchRLModule):
         else:
             self.is_multimodal = False
             # Fallback for non-dict observation spaces
-        
-        # Calculate action size
-        if isinstance(action_space, spaces.Dict):
-            self.action_size = sum(np.prod(space.shape) for space in action_space.spaces.values())
-        else:
-            self.action_size = np.prod(action_space.shape)
         
         if self.is_multimodal:
             # Handle scan observations (images)
@@ -113,7 +106,7 @@ class MultiModalRecurrentPPOModel(TorchRLModule):
         # LSTM layer
         lstm_input_size = prev_size
         if self.use_prev_action:
-            lstm_input_size += self.action_size
+            lstm_input_size += num_outputs
         if self.use_prev_reward:
             lstm_input_size += 1
             
@@ -123,19 +116,13 @@ class MultiModalRecurrentPPOModel(TorchRLModule):
         self.value_head = nn.Linear(self.lstm_cell_size, 1)
         
         # Policy head
-        self.policy_head = nn.Linear(self.lstm_cell_size, self.action_size)
+        self.policy_head = nn.Linear(self.lstm_cell_size, num_outputs)
+        
+        self._value = None
     
-    def _forward_inference(self, batch: Dict[str, TensorType]) -> Dict[str, TensorType]:
-        """Forward pass for inference."""
-        return self._forward_train(batch)
-    
-    def _forward_exploration(self, batch: Dict[str, TensorType]) -> Dict[str, TensorType]:
-        """Forward pass for exploration."""
-        return self._forward_train(batch)
-    
-    def _forward_train(self, batch: Dict[str, TensorType]) -> Dict[str, TensorType]:
-        """Forward pass for training."""
-        obs = batch[SampleBatch.OBS]
+    def forward(self, input_dict: Dict[str, torch.Tensor], state: list, seq_lens: torch.Tensor):
+        """Forward pass through the model."""
+        obs = input_dict["obs"]
         
         if self.is_multimodal:
             # Process scans
@@ -167,13 +154,13 @@ class MultiModalRecurrentPPOModel(TorchRLModule):
         lstm_input = shared_out
         
         # Add previous action if configured
-        if self.use_prev_action and SampleBatch.PREV_ACTIONS in batch:
-            prev_actions = batch[SampleBatch.PREV_ACTIONS].float()
+        if self.use_prev_action and "prev_actions" in input_dict:
+            prev_actions = input_dict["prev_actions"].float()
             lstm_input = torch.cat([lstm_input, prev_actions], dim=-1)
         
         # Add previous reward if configured
-        if self.use_prev_reward and SampleBatch.PREV_REWARDS in batch:
-            prev_rewards = batch[SampleBatch.PREV_REWARDS].float().unsqueeze(-1)
+        if self.use_prev_reward and "prev_rewards" in input_dict:
+            prev_rewards = input_dict["prev_rewards"].float().unsqueeze(-1)
             lstm_input = torch.cat([lstm_input, prev_rewards], dim=-1)
         
         # Reshape for LSTM (batch_size, seq_len, features)
@@ -181,39 +168,31 @@ class MultiModalRecurrentPPOModel(TorchRLModule):
             lstm_input = lstm_input.unsqueeze(1)
         
         # LSTM forward pass
-        # For RLModule, we'll handle state differently - using batch state if available
-        if "state_in" in batch:
-            state = batch["state_in"]
-            h_state, c_state = state[0], state[1]
-        else:
+        if state is None or len(state) == 0:
             # Initialize hidden state
             batch_size = lstm_input.shape[0]
-            h_state = torch.zeros(1, batch_size, self.lstm_cell_size, device=lstm_input.device)
-            c_state = torch.zeros(1, batch_size, self.lstm_cell_size, device=lstm_input.device)
+            h_0 = torch.zeros(1, batch_size, self.lstm_cell_size, device=lstm_input.device)
+            c_0 = torch.zeros(1, batch_size, self.lstm_cell_size, device=lstm_input.device)
+            state = [h_0, c_0]
         
-        lstm_out, (new_h, new_c) = self.lstm(lstm_input, (h_state, c_state))
+        lstm_out, new_state = self.lstm(lstm_input, (state[0], state[1]))
         lstm_out = lstm_out.squeeze(1)  # Remove sequence dimension
         
         # Policy output
-        action_logits = self.policy_head(lstm_out)
+        policy_out = self.policy_head(lstm_out)
         
-        # Value output
-        vf_out = self.value_head(lstm_out).squeeze(-1)
+        # Store value for value_function() call
+        self._value = self.value_head(lstm_out).squeeze(-1)
         
-        return {
-            SampleBatch.ACTION_DIST_INPUTS: action_logits,
-            SampleBatch.VF_PREDS: vf_out,
-            "state_out": [new_h, new_c],
-        }
+        return policy_out, [new_state[0], new_state[1]]
     
-    def get_initial_state(self) -> Dict[str, TensorType]:
-        """Return initial LSTM state for RLModule."""
-        return {
-            "state_in": [
-                torch.zeros(1, 1, self.lstm_cell_size),
-                torch.zeros(1, 1, self.lstm_cell_size)
-            ]
-        }
+    def value_function(self) -> torch.Tensor:
+        """Return the value function estimate."""
+        return self._value
+    
+    def get_initial_state(self) -> list:
+        """Return initial LSTM state."""
+        return []
 
 
 
@@ -243,7 +222,8 @@ def create_recurrent_ppo_config(config: Dict[str, Any], env_class: Type, policie
     if train_agent_types is None:
         train_agent_types = ['gate', 'barrier']
     
-    # With RLModule API, we don't use ModelCatalog anymore
+    # Register single model class for both agent types
+    ModelCatalog.register_custom_model("multimodal_agent", MultiModalRecurrentPPOModel)
     
     # Get PPO configuration with any overrides from training config
     ppo_overrides = config.get("ppo_overrides", {})
@@ -265,7 +245,8 @@ def create_recurrent_ppo_config(config: Dict[str, Any], env_class: Type, policie
             # Default fallback to gate if type unclear
             agent_type = "gate"
         
-        # RLModule will be configured at the algorithm level
+        # Use same model class for all agents
+        model_config["custom_model"] = "multimodal_agent"
         
         # Skip this policy if its agent type is not in train_agent_types
         if agent_type not in train_agent_types:
@@ -301,6 +282,7 @@ def create_recurrent_ppo_config(config: Dict[str, Any], env_class: Type, policie
     # Create PPO configuration
     ppo_config = (
         PPOConfig()
+        .api_stack(enable_rl_module_and_learner=False)  # Disable new API stack for ModelV2 compatibility
         .environment(env=env_class)
         .multi_agent(
             policies=updated_policies,
@@ -308,18 +290,15 @@ def create_recurrent_ppo_config(config: Dict[str, Any], env_class: Type, policie
             policies_to_train=policies_to_train,
         )
         .env_runners(
+            num_env_runners=config["ray"]["num_workers"],
             rollout_fragment_length=config["env"]["rollout_fragment_length"],
             batch_mode=config["ray"]["batch_mode"],
             remote_worker_envs=config["ray"]["remote_worker_envs"],
-            num_env_runners=config["ray"]["num_workers"],
-            num_envs_per_env_runner=config["ray"]["num_envs_per_env_runner"],
-            num_cpus_per_env_runner=config["ray"]["num_cpus_per_worker"],
-            num_gpus_per_env_runner=config["ray"]["num_gpus_per_worker"],
         )
         .training(
             train_batch_size=config["env"]["train_batch_size"],
             # mini_batch_size=config["env"]["mini_batch_size"], sgd_batch_size, sgd_minibatch_size
-            num_epochs=ppo_config_dict["num_sgd_iter"],  # Updated from num_sgd_iter
+            num_sgd_iter=ppo_config_dict["num_sgd_iter"],
             lr=ppo_config_dict["lr"],
             lr_schedule=ppo_config_dict["lr_schedule"],
             clip_param=ppo_config_dict["clip_param"],
@@ -330,19 +309,12 @@ def create_recurrent_ppo_config(config: Dict[str, Any], env_class: Type, policie
             kl_target=ppo_config_dict["kl_target"],
             gamma=ppo_config_dict["gamma"],
             lambda_=ppo_config_dict["lambda"],
-        )
-        .rl_module(
-            rl_module_spec={
-                policy_id: {
-                    "module_class": MultiModalRecurrentPPOModel,
-                    "observation_space": updated_policies[policy_id][1],
-                    "action_space": updated_policies[policy_id][2],
-                    "model_config": model_config,
-                } for policy_id in updated_policies.keys()
-            }
+            model=model_config,
         )
         .resources(
             num_gpus=config["ray"]["num_gpus"],
+            num_cpus_per_worker=config["ray"]["num_cpus_per_worker"],
+            num_gpus_per_worker=config["ray"]["num_gpus_per_worker"],
         )
         .callbacks(callback_class)
         .debugging(seed=config["experiment"]["seed"])
@@ -442,7 +414,7 @@ class RecurrentPPOTrainer:
             num_iterations = self.config["stopping_criteria"]["training_iteration"]
         
         # Build algorithm
-        self.algorithm = self.ppo_config.build_algo()
+        self.algorithm = self.ppo_config.build()
         
         # Training loop
         for i in range(num_iterations):

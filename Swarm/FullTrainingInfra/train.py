@@ -29,6 +29,11 @@ def setup_environment():
     # Set matplotlib backend to avoid GUI issues
     os.environ['MPLBACKEND'] = 'Agg'
     
+    # Disable Ray dashboard completely to avoid pydantic compatibility issues
+    os.environ['RAY_DISABLE_IMPORT_WARNING'] = '1'
+    os.environ['RAY_DISABLE_RUNTIME_ENV_LOG_TO_DRIVER'] = '1'
+    os.environ['RAY_DEDUP_LOGS'] = '0'
+    
     # Add Swarm directory to Python path to import environment
     swarm_path = current_dir.parent
     if swarm_path.exists():
@@ -183,7 +188,12 @@ def main():
     # Initialize Ray
     ray_config = {
         "num_gpus": config["ray"]["num_gpus"],
-        "object_store_memory": config["ray"]["object_store_memory"]
+        "object_store_memory": config["ray"]["object_store_memory"],
+        "include_dashboard": False,  # Disable dashboard to avoid pydantic compatibility issues
+        "_node_ip_address": "127.0.0.1",  # Force local IP to avoid network issues
+        "dashboard_host": "127.0.0.1",
+        "dashboard_port": None,  # Disable dashboard port
+        "_temp_dir": "/tmp/ray_temp"  # Set explicit temp dir
     }
     
     if args.ray_address:
@@ -199,7 +209,7 @@ def main():
         print("W&B logging initialized")
         
         # Get trainer class and create instance
-        trainer_type = config.get("trainer_type", "ppo")
+        trainer_type = config.get("trainer_type", "recurrent_ppo") # use recurrent by deafult
         trainer_class = get_trainer_class(trainer_type)
         trainer = trainer_class(config, env_class)
         print(f"{trainer_type.upper()} trainer created")

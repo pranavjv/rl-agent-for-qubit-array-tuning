@@ -179,31 +179,37 @@ def create_ppo_config(config: Dict[str, Any], env_class: Type, policies: Dict[st
     model_config = ppo_config_dict["model"].copy()
     model_config["custom_model"] = "multimodal_ppo"
     
-    # Update policies with model config
-    for policy_id in policies:
-        policies[policy_id]["config"] = {
+    # Update policies with model config - create new tuples since tuples are immutable
+    updated_policies = {}
+    for policy_id, policy_spec in policies.items():
+        # policy_spec is a tuple: (cls, obs_space, action_space, config)
+        cls, obs_space, action_space, config = policy_spec
+        updated_config = {
             "model": model_config
         }
+        updated_policies[policy_id] = (cls, obs_space, action_space, updated_config)
     
     # Create PPO configuration
     ppo_config = (
         PPOConfig()
         .environment(env=env_class)
         .multi_agent(
-            policies=policies,
+            policies=updated_policies,
             policy_mapping_fn=policy_mapping_fn,
             policies_to_train=policies_to_train,
         )
-        .rollouts(
-            num_rollout_workers=config["ray"]["num_workers"],
+        .env_runners(
+            num_env_runners=config["ray"]["num_workers"],
             rollout_fragment_length=config["env"]["rollout_fragment_length"],
             batch_mode=config["ray"]["batch_mode"],
             remote_worker_envs=config["ray"]["remote_worker_envs"],
+            num_cpus_per_env_runner=config["ray"]["num_cpus_per_worker"],
+            num_gpus_per_env_runner=config["ray"]["num_gpus_per_worker"],
         )
         .training(
             train_batch_size=config["env"]["train_batch_size"],
-            sgd_minibatch_size=config["env"]["sgd_minibatch_size"],
-            num_sgd_iter=ppo_config_dict["num_sgd_iter"],
+            mini_batch_size=config["env"]["mini_batch_size"],
+            num_epochs=ppo_config_dict["num_sgd_iter"],  # Updated from num_sgd_iter
             lr=ppo_config_dict["lr"],
             lr_schedule=ppo_config_dict["lr_schedule"],
             clip_param=ppo_config_dict["clip_param"],
@@ -218,8 +224,6 @@ def create_ppo_config(config: Dict[str, Any], env_class: Type, policies: Dict[st
         )
         .resources(
             num_gpus=config["ray"]["num_gpus"],
-            num_cpus_per_worker=config["ray"]["num_cpus_per_worker"],
-            num_gpus_per_worker=config["ray"]["num_gpus_per_worker"],
         )
         .callbacks(callback_class)
         .debugging(seed=config["experiment"]["seed"])
@@ -316,7 +320,7 @@ class PPOTrainer:
             num_iterations = self.config["stopping_criteria"]["training_iteration"]
         
         # Build algorithm
-        self.algorithm = self.ppo_config.build()
+        self.algorithm = self.ppo_config.build_algo()
         
         # Training loop
         for i in range(num_iterations):

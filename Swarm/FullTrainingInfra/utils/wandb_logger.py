@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.env import BaseEnv
-from ray.rllib.evaluation import MultiAgentEpisode
+from ray.rllib.env.multi_agent_episode import MultiAgentEpisode
 from ray.rllib.policy import Policy
 from ray.rllib.evaluation.worker_set import WorkerSet
 
@@ -181,7 +181,7 @@ class MultiAgentMetricsCallback(DefaultCallbacks):
             )
 
 
-def setup_wandb_logging(config: Dict[str, Any]) -> tuple[WandbLogger, MultiAgentMetricsCallback]:
+def setup_wandb_logging(config: Dict[str, Any]):
     """
     Set up W&B logging with custom callback.
     
@@ -189,16 +189,18 @@ def setup_wandb_logging(config: Dict[str, Any]) -> tuple[WandbLogger, MultiAgent
         config: Training configuration dictionary
         
     Returns:
-        Tuple of (wandb_logger, callback)
+        Tuple of (wandb_logger, callback_class)
     """
     # Create W&B logger
     wandb_logger = WandbLogger(config)
     
-    # Create custom callback
-    callback = MultiAgentMetricsCallback()
-    callback.set_wandb_logger(wandb_logger)
+    # Create callback class factory that captures the wandb_logger
+    class ConfiguredMultiAgentMetricsCallback(MultiAgentMetricsCallback):
+        def __init__(self):
+            super().__init__()
+            self.set_wandb_logger(wandb_logger)
     
-    return wandb_logger, callback
+    return wandb_logger, ConfiguredMultiAgentMetricsCallback
 
 
 def create_custom_metrics_dict() -> Dict[str, Any]:
