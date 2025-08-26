@@ -45,13 +45,13 @@ def setup_environment():
 def import_environment():
     """Import the quantum device environment."""
     try:
+        # Add Swarm directory to path for package imports
         swarm_dir = current_dir.parent
-        env_path = os.path.join(swarm_dir, "Environment", "env.py")
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("env", env_path)
-        env_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(env_module)
-        QuantumDeviceEnv = env_module.QuantumDeviceEnv
+        if str(swarm_dir) not in sys.path:
+            sys.path.insert(0, str(swarm_dir))
+        
+        # Import from Environment package
+        from Environment.env import QuantumDeviceEnv
         return QuantumDeviceEnv
     except Exception as e:
         print(f"Failed to import QuantumDeviceEnv: {e}")
@@ -186,6 +186,8 @@ def main():
         config["logging"]["wandb"]["enabled"] = False
     
     # Initialize Ray
+    # Setup Ray runtime environment
+    swarm_dir = current_dir.parent
     ray_config = {
         "num_gpus": config["ray"]["num_gpus"],
         "object_store_memory": config["ray"]["object_store_memory"],
@@ -193,7 +195,14 @@ def main():
         "_node_ip_address": "127.0.0.1",  # Force local IP to avoid network issues
         "dashboard_host": "127.0.0.1",
         "dashboard_port": None,  # Disable dashboard port
-        "_temp_dir": "/tmp/ray_temp"  # Set explicit temp dir
+        "_temp_dir": "/tmp/ray_temp",  # Set explicit temp dir
+        "runtime_env": {
+            "working_dir": str(swarm_dir),
+            "py_modules": [
+                str(swarm_dir / "Environment"),
+                str(swarm_dir / "CapacitanceModel")
+            ]
+        }
     }
     
     if args.ray_address:
