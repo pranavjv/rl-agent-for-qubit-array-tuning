@@ -1,0 +1,24 @@
+# QArray
+git+https://github.com/b-vanstraaten/qarray-latched.git@b46d353db97887025f06a17dd10d72869cd0a7d0
+qarray
+
+# Core ML/RL dependencies
+torch
+torchvision
+ray[rllib]
+wandb
+gymnasium
+
+# Development tools
+pytest
+ruff
+black
+mypy
+
+# Data and visualization
+numpy
+matplotlib
+pyyaml
+
+# Additional dependencies for quantum device simulation
+scipy
