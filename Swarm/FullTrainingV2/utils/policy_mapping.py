@@ -1,23 +1,22 @@
 
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec, RLModuleSpec
+from ray.rllib.core.rl_module.default_model_config import DefaultModelConfig
+from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import DefaultPPOTorchRLModule
+from ray.rllib.algorithms.ppo.ppo_catalog import PPOCatalog
 import sys
 import os
 from pathlib import Path
 
-# Add paths for imports
-current_dir = Path(__file__).parent.parent
-swarm_dir = current_dir.parent  # Get Swarm directory
-sys.path.append(str(swarm_dir))
+# # Add paths for imports
+# current_dir = Path(__file__).parent.parent
+# swarm_dir = current_dir.parent  # Get Swarm directory
+# sys.path.append(str(swarm_dir))
 
+#from custom_catalog import CustomCatalog
 try:
-    from VoltageAgent.ppo_trainer_recurrent import SingleAgentRecurrentPPOModel
-except ImportError:
-    # Fallback: try adding VoltageAgent directory directly
-    voltage_agent_dir = swarm_dir / "VoltageAgent"
-    if str(voltage_agent_dir) not in sys.path:
-        sys.path.append(str(voltage_agent_dir))
-    from ppo_trainer_recurrent import SingleAgentRecurrentPPOModel
-
+    from custom_image_catalog import CustomImageCatalog
+except ModuleNotFoundError:
+    from utils.custom_image_catalog import CustomImageCatalog
 
 def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
     """
@@ -54,19 +53,25 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
     
     # Create observation space for gate agents
     # Each gate agent sees: dual-channel image + single voltage value
-    gate_obs_space = spaces.Dict({
-        'image': spaces.Box(
-            low=0.0, high=1.0,
-            shape=(image_shape[0], image_shape[1], 2),  # Dual channel for gate agents
-            dtype=np.float32
-        ),
-        'voltage': spaces.Box(
-            low=gate_low, high=gate_high,
-            shape=(1,),  # Single voltage value
-            dtype=np.float32
-        )
-    })
-    
+    # gate_obs_space = spaces.Dict({
+    #     'image': spaces.Box(
+    #         low=0.0, high=1.0,
+    #         shape=(image_shape[0], image_shape[1], 2),  # Dual channel for gate agents
+    #         dtype=np.float32
+    #     ),
+    #     'voltage': spaces.Box(
+    #         low=gate_low, high=gate_high,
+    #         shape=(1,),  # Single voltage value
+    #         dtype=np.float32
+    #     )
+    # })
+    # IMAGE ONLY SPACE
+    gate_obs_space = spaces.Box(
+        low=0.0, high=1.0,
+        shape=(image_shape[0], image_shape[1], 2),  # Dual channel for gate agents
+        dtype=np.float32
+    )
+
     # Create action space for gate agents
     # Each gate agent controls: single gate voltage
     gate_action_space = spaces.Box(
@@ -89,7 +94,13 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
             dtype=np.float32
         )
     })
-    
+    # IMAGE ONLY SPACE
+    barrier_obs_space = spaces.Box(
+        low=0.0, high=1.0,
+        shape=(image_shape[0], image_shape[1], 1),  # Single channel for barrier agents
+        dtype=np.float32
+    )
+
     # Create action space for barrier agents
     # Each barrier agent controls: single barrier voltage
     barrier_action_space = spaces.Box(
@@ -99,16 +110,29 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
         )
     
     # Create model config for custom RLModule
+    # model_config=DefaultModelConfig(
+    #     use_lstm=True,
+    #     lstm_cell_size=128, # default for now
+    #     lstm_use_prev_action=True,
+    #     lstm_use_prev_reward=False, # must not set this to true
+    # )
     model_config = {
-        "lstm_cell_size": 64,
+        "max_seq_len": 50,
+        "batch_mode": "complete_episodes",
+
+        "use_lstm": True,
+        "lstm_cell_size": 128,
         "lstm_use_prev_action": True,
-        "lstm_use_prev_reward": True,
-        "fcnet_hiddens": [128, 128]
+        "lstm_use_prev_reward": False,
     }
     
     # Create single agent RLModule specs
     plunger_spec = RLModuleSpec(
-        module_class=SingleAgentRecurrentPPOModel,
+        #module_class=SingleAgentRecurrentPPOModel,
+        module_class=DefaultPPOTorchRLModule, # uses the default TorchRLModule
+        #catalog_class=CustomCatalog,
+        #catalog_class=PPOCatalog,
+        catalog_class=CustomImageCatalog,
         observation_space=gate_obs_space,
         action_space=gate_action_space,
         model_config=model_config,
@@ -116,7 +140,11 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
     )
     
     barrier_spec = RLModuleSpec(
-        module_class=SingleAgentRecurrentPPOModel,
+        #module_class=SingleAgentRecurrentPPOModel,
+        module_class=DefaultPPOTorchRLModule, # uses the default TorchRLModule
+        #catalog_class=CustomCatalog,
+        #catalog_class=PPOCatalog,
+        catalog_class=CustomImageCatalog,
         observation_space=barrier_obs_space,
         action_space=barrier_action_space,
         model_config=model_config,
