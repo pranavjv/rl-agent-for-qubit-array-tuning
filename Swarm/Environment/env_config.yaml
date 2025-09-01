@@ -2,12 +2,12 @@
 # Contains all configs related to the environment and the rl algorithm
 
 simulator:
-  num_dots: 4
-
   # Max steps in a single training rollout
   max_steps: 50
   # Tolerance from ground truth when we are done
   tolerance: 0.5
+
+  num_dots: 4
   
 
   measurement:
@@ -21,5 +21,5 @@ simulator:
     resolution: 128
 
 init:
-  debug: true
+  debug: false
   seed: 42

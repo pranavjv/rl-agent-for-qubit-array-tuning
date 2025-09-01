@@ -6,9 +6,22 @@ import yaml
 import os
 import sys
 import torch
-# Import qarray_base_class using absolute import
-sys.path.append(os.path.dirname(__file__))
-from qarray_base_class import QarrayBaseClass
+
+# Import qarray_base_class - multiple approaches for Ray compatibility
+try:
+    # Try relative import first (when used as package)
+    from .qarray_base_class import QarrayBaseClass
+except ImportError:
+    try:
+        # Try direct import (when Environment is in sys.path)  
+        from qarray_base_class import QarrayBaseClass
+    except ImportError:
+        # Fallback: add current directory to path and import
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        from qarray_base_class import QarrayBaseClass
+
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
@@ -17,15 +30,27 @@ matplotlib.use('Agg')
 try:
     from ..CapacitanceModel import CapacitancePredictionModel, CapacitancePredictor
 except ImportError:
-    # Fallback for direct execution
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'CapacitanceModel'))
-    from CapacitancePrediction import CapacitancePredictionModel
-    from BayesianUpdater import CapacitancePredictor
-
-"""
-todo:
-
-"""
+    # Fallback for direct execution - try absolute imports with path adjustment
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)  # Swarm directory
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        from CapacitanceModel.CapacitancePrediction import CapacitancePredictionModel
+        from CapacitanceModel.BayesianUpdater import CapacitancePredictor
+    except ImportError:
+        # Final fallback - individual module imports with path adjustment
+        try:
+            capacitance_dir = os.path.join(parent_dir, 'CapacitanceModel')
+            if capacitance_dir not in sys.path:
+                sys.path.insert(0, capacitance_dir)
+            from CapacitancePrediction import CapacitancePredictionModel
+            from BayesianUpdater import CapacitancePredictor
+        except ImportError:
+            # Disable capacitance model if all imports fail
+            CapacitancePredictionModel = None
+            CapacitancePredictor = None
+            print("Warning: Could not import capacitance model components")
 
 
 class QuantumDeviceEnv(gym.Env):
@@ -33,17 +58,36 @@ class QuantumDeviceEnv(gym.Env):
     Simulator environment that handles all env related logic
     loads in the qarray/ device model to extract observations
     """
-    def __init__(self, training=True, config_path="env_config.yaml"):
+    def __init__(self, num_dots=None, training=True, gpu='auto', capacitance_model=None, config_path="env_config.yaml"):
+        """
+        Setup for the base qarray environment class
+
+        Args:
+            capacitance_model: if not None, we use the external model passed for better memory management
+        """
         super().__init__()
 
         self.config = self._load_config(config_path)
         self.training = training # if we are training or not
+        self.num_dots = num_dots if num_dots else self.config['simulator']['num_dots']
+
+        # Assign the correct env device
+        if gpu=='auto':
+            self.gpu = gpu
+        else:
+            try:
+                gpu = int(gpu) if isinstance(gpu, str) and gpu.isdigit() else gpu
+                visible_devices = [i for i in range(torch.cuda.device_count())]
+                assert gpu in visible_devices, f"GPU device not found, got {gpu} but expected one of {visible_devices}"
+                self.gpu = gpu
+            except Exception as e:
+                print(f"Warning, setting gpu='auto': {e}")
+                self.gpu = 'auto'
 
         # obs voltage min/max define the range over which we sweep the 2d csd pairs
         self.obs_voltage_min = self.config['simulator']['measurement']['gate_voltage_sweep_range']['min']
         self.obs_voltage_max = self.config['simulator']['measurement']['gate_voltage_sweep_range']['max']
         self.debug = self.config['init']['debug']
-        self.num_dots = self.config['simulator']['num_dots']
         self.obs_image_size = self.config['simulator']['measurement']['resolution']
         self.array = QarrayBaseClass(num_dots=self.num_dots, obs_voltage_min=self.obs_voltage_min, obs_voltage_max=self.obs_voltage_max, obs_image_size=self.obs_image_size, debug=self.debug)
 
@@ -100,7 +144,22 @@ class QuantumDeviceEnv(gym.Env):
         })
 
         # Initialize capacitance prediction model
-        self._init_capacitance_model()
+        if capacitance_model is None:
+            self._init_capacitance_model()
+        else:
+            try:
+                bayesian_predictor = CapacitancePredictor(
+                    n_dots=self.num_dots,
+                    prior_config=distance_prior
+                )
+                self.capacitance_model = {
+                    "ml_model": capacitance_model["ml_model"],
+                    "bayesian_predictor": bayesian_predictor,
+                    "device": capacitance_model["ml_model"].device
+                }
+            except Exception as e:
+                print(f"Invalid capacitance model: {e}")
+                raise
 
         self.reset()
 
@@ -391,17 +450,31 @@ class QuantumDeviceEnv(gym.Env):
         """
         try:
             # Determine device (GPU if available, otherwise CPU)
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            
+            if torch.cuda.is_available():
+                if self.gpu == 'auto':
+                    device = torch.device('cuda')
+                else:
+                    device = torch.device(f'cuda:{self.gpu}')
+                print(f"Running capacitance model on {device}")
+            else:
+                device = torch.device('cpu')
+                print("Warning: Failed to find available CUDA device, running on CPU")
+
             # Initialize the neural network model
             ml_model = CapacitancePredictionModel()
             
-            # Load pre-trained weights
+            # Load pre-trained weights - use absolute path from project root
+            if 'SWARM_PROJECT_ROOT' in os.environ:
+                # Ray distributed mode: use environment variable set by training script
+                swarm_dir = os.environ['SWARM_PROJECT_ROOT']
+            else:
+                # Local development mode: find Swarm directory from current file
+                swarm_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                
             weights_path = os.path.join(
-                os.path.dirname(__file__), 
-                '..', 
+                swarm_dir,
                 'CapacitanceModel', 
-                'test_outputs', 
+                'artifacts', 
                 'best_model.pth'
             )
             
@@ -456,6 +529,8 @@ class QuantumDeviceEnv(gym.Env):
                 'bayesian_predictor': bayesian_predictor,
                 'device': device
             }
+
+            print("Successfully loaded capacitance model.")
             
 
         except Exception as e:
@@ -500,7 +575,7 @@ class QuantumDeviceEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = QuantumDeviceEnv()
+    env = QuantumDeviceEnv(num_dots=4, gpu=1)
     env.reset()
     print(env.observation_space)
     print(env.action_space)

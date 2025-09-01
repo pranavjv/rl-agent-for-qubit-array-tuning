@@ -5,6 +5,7 @@ This file contains the QarrayBaseClass which is used to create a quantum dot arr
 import numpy as np
 import yaml
 import os
+
 from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
@@ -382,20 +383,22 @@ class QarrayBaseClass:
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=4)
+    experiment = QarrayBaseClass(num_dots=8)
+    import time
 
-    # Test optimal voltage calculation
-    gt = experiment._get_ground_truth()
-    print("Optimal voltages:", gt)
+    start = time.time()
+
+    # os.environ['JAX_PLATFORM_NAME'] = 'cpu'  # Force CPU-only execution
+    # os.environ['JAX_PLATFORMS'] = 'cpu'  # Alternative JAX CPU-only setting
+    os.environ['CUDA_VISIBLE_DEVICES'] = '7'
+
+    image = experiment._get_obs([0]*8, [0]*7)['image'][:,:,1]
+    print(time.time() - start)
     
-    # Test getting observations
-    gate_voltages = [0.0] * experiment.num_dots
-    barrier_voltages = [0.0] * experiment.num_barrier_voltages
+    start = time.time()
 
-    obs = experiment._get_obs(gt, barrier_voltages)
-    print("Observation shape:", obs["image"].shape)
-    print("Gate voltages shape:", len(obs["obs_gate_voltages"]))
-    print("Barrier voltages shape:", len(obs["obs_barrier_voltages"]))
+    image = experiment._get_obs([0]*8, [0]*7)['image'][:,:,1]
+    print(time.time() - start)
 
-    print(obs["image"].shape)
-    experiment._render_frame(obs["image"][:,:,1])
+    experiment._render_frame(image)
+
