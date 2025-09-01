@@ -402,8 +402,21 @@ class QuantumDeviceEnv(gym.Env):
         log_vars_np = log_vars.cpu().numpy()  # Shape: (num_dots-1, 3)
         
         for i in range(self.num_dots - 1):
+            # Get current mean estimates for this dot pair and its neighbors
+            current_mean_ij, _ = self.capacitance_model['bayesian_predictor'].get_capacitance_stats(i, i+1)
+            current_mean_ik, _ = self.capacitance_model['bayesian_predictor'].get_capacitance_stats(i, max(0, i-1) if i > 0 else i+2)
+            current_mean_jk, _ = self.capacitance_model['bayesian_predictor'].get_capacitance_stats(i+1, min(self.num_dots-1, i+2) if i+2 < self.num_dots else i)
+            
+            # Add current means to delta predictions to get absolute values
+            absolute_values = [
+                current_mean_ij + float(values_np[i, 0]),  # C_ij + delta_ij
+                current_mean_ik + float(values_np[i, 1]),  # C_ik + delta_ik  
+                current_mean_jk + float(values_np[i, 2])   # C_jk + delta_jk
+            ]
+            
+
             # Create ml_outputs format expected by update_from_scan
-            ml_outputs = [(float(values_np[i, j]), float(log_vars_np[i, j])) for j in range(3)]
+            ml_outputs = [absolute_values, float(log_vars_np[i, j]) for j in range(3)]
             
             # Update the Bayesian predictor for this dot pair
             self.capacitance_model['bayesian_predictor'].update_from_scan((i, i+1), ml_outputs)

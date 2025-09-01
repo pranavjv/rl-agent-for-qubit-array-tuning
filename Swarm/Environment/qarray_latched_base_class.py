@@ -5,8 +5,14 @@ This file contains the QarrayBaseClass which is used to create a quantum dot arr
 import numpy as np
 import yaml
 import os
+from qarray_latched.DotArrays.TunnelCoupledChargeSensed import TunnelCoupledChargeSensed
 
-from qarray import ChargeSensedDotArray, WhiteNoise, TelegraphNoise, LatchingModel
+from qarray import WhiteNoise, TelegraphNoise, LatchingModel
+from qarray_latched.DotArrays.barrier_voltage_model import BarrierVoltageModel
+from qarray_latched.DotArrays.voltage_dependent_capacitance import create_linear_capacitance_model
+import jax.numpy as jnp
+
+
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 matplotlib.use('Agg')
@@ -22,7 +28,7 @@ add barrier voltages in _get_obs
 
 class QarrayBaseClass:
  
-    def __init__(self, num_dots, config_path='qarray_config.yaml', obs_voltage_min=-0.5, obs_voltage_max=0.5, obs_image_size=128, debug=False, **kwargs):
+    def __init__(self, num_dots, config_path='qarray_latched_config.yaml', obs_voltage_min=-0.5, obs_voltage_max=0.5, obs_image_size=128, debug=False, **kwargs):
 
         # --- Load Configuration ---
         config_path = os.path.join(os.path.dirname(__file__), config_path)
@@ -39,29 +45,51 @@ class QarrayBaseClass:
         self.obs_voltage_min = obs_voltage_min
         self.obs_voltage_max = obs_voltage_max
 
+        self.optimal_tc = self.config['simulator']['measurement']['tc']
         optimal_center_dots = self.config['simulator']['measurement']['optimal_VG_center']['dots']
         optimal_center_sensor = self.config['simulator']['measurement']['optimal_VG_center']['sensor']
         self.optimal_VG_center = [optimal_center_dots] * num_dots + [optimal_center_sensor] # must always call model.optimal_Vg on this
 
+
+        self.barrier_alpha = None
+        self.barrier_tc_base = None
         # --- Initialize Model ---
         self.model = self._load_model()
 
 
-    def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2):
+    def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2, barrier_voltages):
         """
-        Get charge sensor data for given voltages.
+        Get charge sensor data for given voltages using TunnelCoupledChargeSensed interface.
         
         Args:
-            voltages (np.ndarray): 2D voltage grid or voltage center configuration
+            voltage1 (float): Center voltage for first gate
+            voltage2 (float): Center voltage for second gate  
+            gate1 (int): First gate index (1-indexed for qarray)
+            gate2 (int): Second gate index (1-indexed for qarray)
+            barrier_voltages (np.ndarray): Barrier voltage array
             
         Returns:
-            np.ndarray: Charge sensor data of shape (height, width, channels)
+            np.ndarray: Charge sensor data of shape (height, width)
         """
-
-        z, _ = self.model.do2d_open(
-            gate1, voltage1 + self.obs_voltage_min, voltage1 + self.obs_voltage_max, self.obs_image_size,
-            gate2, voltage2 + self.obs_voltage_min, voltage2 + self.obs_voltage_max, self.obs_image_size
+        
+        # Generate 2D virtual gate grid using gate_voltage_composer
+        vg = self.model.gate_voltage_composer.do2d(
+            f'P{gate1}', voltage1 + self.obs_voltage_min, voltage1 + self.obs_voltage_max, self.obs_image_size,
+            f'P{gate2}', voltage2 + self.obs_voltage_min, voltage2 + self.obs_voltage_max, self.obs_image_size
         )
+        
+        # Flatten the voltage grid to shape (obs_image_size^2, n_gates)
+        vg_flat = vg.reshape(-1, vg.shape[-1])
+        
+        # Create barrier voltage array (same shape as flattened gate voltage array)
+        vb = jnp.full((vg_flat.shape[0], self.num_barrier_voltages), jnp.array(barrier_voltages))
+        
+        # Get charge sensor data using the new interface
+        z, _ = self.model.charge_sensor_open(vg_flat, vb)
+        
+        # Reshape to 2D image
+        z = z.reshape(self.obs_image_size, self.obs_image_size)
+        
         return z
 
 
@@ -71,7 +99,6 @@ class QarrayBaseClass:
         
         Returns a multi-modal observation with image and voltage data as numpy arrays.
         """
-        # TODO we are currently not using the barrier voltages
 
         assert len(gate_voltages) == self.num_dots, f"Incorrect gate voltage shape, expected {self.num_dots}, got {len(gate_voltages)}"
         assert len(barrier_voltages) == self.num_dots - 1, f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
@@ -81,8 +108,8 @@ class QarrayBaseClass:
         for i, (gate1, gate2) in enumerate(zip(allgates[:-1], allgates[1:])):
             voltage1 = gate_voltages[i]      # Use 0-based indexing for gate_voltages array
             voltage2 = gate_voltages[i+1]    # Use 0-based indexing for gate_voltages array
-            z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2)
-            all_z.append(z[:, :, 0])
+            z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2, barrier_voltages)
+            all_z.append(z)  # z is now 2D, no need to index [:, :, 0]
 
         # Stack images along the channel dimension
         all_images = np.stack(all_z, axis=-1)
@@ -174,6 +201,82 @@ class QarrayBaseClass:
         
         return Cgd
     
+    def _generate_cbd_matrix(self, config_ranges: dict, rng: np.random.Generator) -> np.ndarray:
+        """Generate barrier-to-dot capacitance matrix with distance-based coupling."""
+        cbd_config = config_ranges["Cbd"]
+        distance_coupling = cbd_config["distance_coupling"]
+        
+        # Cbd is (n_dot, n_barrier) matrix
+        Cbd = np.zeros((self.num_dots, self.num_barrier_voltages))
+        
+        for dot_i in range(self.num_dots):
+            for barrier_j in range(self.num_barrier_voltages):
+                # Calculate distance between dot and barrier
+                # Barriers are typically between adjacent dots
+                barrier_center = barrier_j + 0.5  # Barrier j is between dots j and j+1
+                distance = int(abs(dot_i - barrier_center))
+                distance = max(1, distance)  # Minimum distance is 1
+                
+                coupling_range = self._get_coupling_by_distance(distance_coupling, distance)
+                Cbd[dot_i, barrier_j] = self._sample_from_range(coupling_range, rng)
+        
+        return Cbd
+    
+    def _generate_cbg_matrix(self, config_ranges: dict, rng: np.random.Generator) -> np.ndarray:
+        """Generate barrier-to-gate capacitance matrix with distance-based coupling."""
+        cbg_config = config_ranges["Cbg"]
+        distance_coupling = cbg_config["distance_coupling"]
+        num_gates = self.num_dots + 1  # plunger gates + sensor gate
+        
+        # Cbg is (n_barrier, n_gate) matrix
+        Cbg = np.zeros((self.num_barrier_voltages, num_gates))
+        
+        for barrier_i in range(self.num_barrier_voltages):
+            for gate_j in range(num_gates):
+                if gate_j < self.num_dots:  # Plunger gates
+                    # Calculate distance between barrier and gate
+                    barrier_center = barrier_i + 0.5  # Barrier i is between dots i and i+1
+                    distance = int(abs(barrier_center - gate_j))
+                    distance = max(1, distance)  # Minimum distance is 1
+                    
+                    coupling_range = self._get_coupling_by_distance(distance_coupling, distance)
+                    Cbg[barrier_i, gate_j] = self._sample_from_range(coupling_range, rng)
+                else:  # Sensor gate
+                    # Use distance 2 coupling for sensor gate
+                    coupling_range = self._get_coupling_by_distance(distance_coupling, 2)
+                    Cbg[barrier_i, gate_j] = self._sample_from_range(coupling_range, rng)
+        
+        return Cbg
+    
+    def _generate_cbs_matrix(self, config_ranges: dict, rng: np.random.Generator) -> np.ndarray:
+        """Generate barrier-to-sensor capacitance matrix."""
+        cbs_config = config_ranges["Cbs"]
+        coupling_range = cbs_config["coupling"]
+        
+        # Cbs is (n_sensor, n_barrier) matrix - typically (1, n_barrier)
+        Cbs = np.zeros((1, self.num_barrier_voltages))
+        
+        for barrier_j in range(self.num_barrier_voltages):
+            Cbs[0, barrier_j] = self._sample_from_range(coupling_range, rng)
+        
+        return Cbs
+    
+    def _generate_cbb_matrix(self, config_ranges: dict, rng: np.random.Generator) -> np.ndarray:
+        """Generate barrier-to-barrier capacitance matrix with distance-based coupling."""
+        cbb_config = config_ranges["Cbb"]
+        diagonal_val = cbb_config["diagonal"]
+        distance_coupling = cbb_config["distance_coupling"]
+        
+        def fill_cbb(i: int, j: int) -> float:
+            distance = abs(i - j)
+            if distance == 0:
+                return diagonal_val
+            else:
+                coupling_range = self._get_coupling_by_distance(distance_coupling, distance)
+                return self._sample_from_range(coupling_range, rng)
+        
+        return self._create_symmetric_matrix(self.num_barrier_voltages, fill_cbb)
+    
     def _generate_sensor_capacitances(self, config_ranges: dict, rng: np.random.Generator) -> tuple:
         """Generate dot-to-sensor (Cds) and gate-to-sensor (Cgs) capacitances."""
         # Cds: dot-to-sensor capacitances
@@ -235,6 +338,29 @@ class QarrayBaseClass:
             "p_leads": p_leads,
             "p_inter": p_inter,
         }
+    
+    def _generate_barrier_model_parameters(self, config_ranges: dict, rng: np.random.Generator) -> dict:
+        """Generate barrier voltage model parameters."""
+        barrier_config = config_ranges["barrier_model"]
+        
+        tc_base = self._sample_from_range(barrier_config["tc_base"], rng)
+        # Generate alpha array with one value per barrier
+        alpha = [self._sample_from_range(barrier_config["alpha_per_barrier"], rng) 
+                for _ in range(self.num_barrier_voltages)]
+        
+        return {
+            "tc_base": tc_base,
+            "alpha": alpha
+        }
+    
+    def _generate_voltage_capacitance_parameters(self, config_ranges: dict, rng: np.random.Generator) -> dict:
+        """Generate voltage-dependent capacitance model parameters."""
+        vc_config = config_ranges["voltage_capacitance_model"]
+        
+        return {
+            "alpha": self._sample_from_range(vc_config["alpha"], rng),
+            "beta": self._sample_from_range(vc_config["beta"], rng)
+        }
 
     def _gen_random_qarray_params(self, rng: np.random.Generator = None) -> dict:
         """
@@ -255,19 +381,36 @@ class QarrayBaseClass:
             'Cgd': model_config['Cgd'], 
             'Cds': model_config['Cds'],
             'Cgs': model_config['Cgs'],
+            'Cbd': model_config['Cbd'],
+            'Cbg': model_config['Cbg'],
+            'Cbs': model_config['Cbs'],
+            'Cbb': model_config['Cbb'],
             'white_noise_amplitude': model_config['white_noise_amplitude'],
             'telegraph_noise_parameters': model_config['telegraph_noise_parameters'],
             'latching_model_parameters': model_config['latching_model_parameters'],
+            'barrier_model': model_config['barrier_model'],
+            'voltage_capacitance_model': model_config['voltage_capacitance_model'],
             'T': model_config['T'],
-            'coulomb_peak_width': model_config['coulomb_peak_width']
+            'coulomb_peak_width': model_config['coulomb_peak_width'],
+            'tc': model_config['tc']
         }
 
         # Generate all matrix components using helper methods
         Cdd = self._generate_cdd_matrix(config_ranges, rng)
         Cgd = self._generate_cgd_matrix(config_ranges, rng)
         Cds, Cgs = self._generate_sensor_capacitances(config_ranges, rng)
+        
+        # Generate barrier matrices
+        Cbd = self._generate_cbd_matrix(config_ranges, rng)
+        Cbg = self._generate_cbg_matrix(config_ranges, rng)
+        Cbs = self._generate_cbs_matrix(config_ranges, rng)
+        Cbb = self._generate_cbb_matrix(config_ranges, rng)
+        
+        # Generate model parameters
         noise_params = self._generate_noise_parameters(config_ranges, rng)
         latching_params = self._generate_latching_parameters(config_ranges, rng)
+        barrier_model_params = self._generate_barrier_model_parameters(config_ranges, rng)
+        voltage_capacitance_params = self._generate_voltage_capacitance_parameters(config_ranges, rng)
 
         # Assemble final model parameters
         model_params = {
@@ -275,11 +418,18 @@ class QarrayBaseClass:
             "Cgd": Cgd,
             "Cds": Cds,
             "Cgs": Cgs,
+            "Cbd": Cbd,
+            "Cbg": Cbg,
+            "Cbs": Cbs,
+            "Cbb": Cbb,
             "white_noise_amplitude": noise_params["white_noise_amplitude"],
             "telegraph_noise_parameters": noise_params["telegraph_noise_parameters"],
             "latching_model_parameters": latching_params,
+            "barrier_model_parameters": barrier_model_params,
+            "voltage_capacitance_parameters": voltage_capacitance_params,
             "T": self._sample_from_range(config_ranges['T'], rng),
             "coulomb_peak_width": self._sample_from_range(config_ranges['coulomb_peak_width'], rng),
+            "tc": self._sample_from_range(config_ranges['tc'], rng),
             "algorithm": model_config['algorithm'],
             "implementation": model_config['implementation'],
             "max_charge_carriers": model_config['max_charge_carriers'],
@@ -291,37 +441,66 @@ class QarrayBaseClass:
 
     def _load_model(self):
         """
-        Load the model from the config file.
+        Load the TunnelCoupledChargeSensed model from the config file.
         """
 
         model_params = self._gen_random_qarray_params()
 
+        # Extract noise models
         white_noise = WhiteNoise(amplitude=model_params['white_noise_amplitude'])
         telegraph_noise = TelegraphNoise(**model_params['telegraph_noise_parameters'])
         noise_model = white_noise + telegraph_noise
+        
+        # Extract latching model
         latching_params = model_params['latching_model_parameters']
         latching_model = LatchingModel(**{k: v for k, v in latching_params.items() if k != "Exists"}) if latching_params["Exists"] else None
 
+        # Extract capacitance matrices
         Cdd = model_params['Cdd']
         Cgd = model_params['Cgd']
         Cds = model_params['Cds']
         Cgs = model_params['Cgs']
+        Cbd = model_params['Cbd']
+        Cbg = model_params['Cbg']
+        Cbs = model_params['Cbs']
+        Cbb = model_params['Cbb']
 
-
-
-        model = ChargeSensedDotArray(
-            Cdd=Cdd,
-            Cgd=Cgd,
-            Cds=Cds,
-            Cgs=Cgs,
-            coulomb_peak_width=model_params['coulomb_peak_width'],
-            T=model_params['T'],
-            noise_model=noise_model,
-            latching_model=latching_model,
-            algorithm=model_params['algorithm'],
-            implementation=model_params['implementation'],
-            max_charge_carriers=model_params['max_charge_carriers'],
+        # Create barrier voltage model
+        barrier_params = model_params['barrier_model_parameters']
+        barrier_model = BarrierVoltageModel(
+            n_barrier=self.num_barrier_voltages, 
+            n_dot=self.num_dots,
+            tc_base=barrier_params['tc_base'], 
+            alpha=barrier_params['alpha']
         )
+
+        self.barrier_alpha = barrier_params['alpha']
+        self.barrier_tc_base = barrier_params['tc_base']
+
+        # Create TunnelCoupledChargeSensed model
+        model = TunnelCoupledChargeSensed(
+            Cdd=Cdd, Cgd=Cgd, Cds=Cds, Cgs=Cgs,
+            Cbd=Cbd, Cbg=Cbg, Cbs=Cbs, Cbb=Cbb,
+            barrier_model=barrier_model,
+            coulomb_peak_width=model_params['coulomb_peak_width'], 
+            T=model_params['T'], 
+            max_charge_carriers=model_params['max_charge_carriers'], 
+            tc=model_params['tc'],
+            noise_model=noise_model, 
+            latching_model=latching_model,
+            voltage_capacitance_model=None  # Will be set below
+        )
+
+        # Create and set voltage-dependent capacitance model
+        vc_params = model_params['voltage_capacitance_parameters']
+        voltage_capacitance_model = create_linear_capacitance_model(
+            cdd_0=jnp.array(model.cdd), 
+            cgd_0=jnp.array(model.cgd),
+            alpha=vc_params['alpha'],
+            beta=vc_params['beta']
+        )
+        model.voltage_capacitance_model = voltage_capacitance_model
+
         return model
 
 
@@ -379,32 +558,76 @@ class QarrayBaseClass:
         Get the ground truth for the quantum dot array.
         """
 
-        vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)[:-1]
+        #TODO: need to change indexing to play well with new setup
+        vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)
+
+        sensor_optimal_physical = vg_optimal_physical[-1]
+
+        tc_ratio = self.optimal_tc / self.barrier_tc_base
+        vb_mag = max(0.1, -np.log(max(tc_ratio, 0.01)) / np.mean(self.barrier_model.alpha))
+        vb_optimal = np.full(self.num_barrier_voltages, vb_mag)
+
+
         perfect_virtual_matrix = self.model.compute_optimal_virtual_gate_matrix()
 
 
         vg_optimal_virtual = np.linalg.inv(perfect_virtual_matrix) @ (vg_optimal_physical - self.model.virtual_gate_origin)
-        return vg_optimal_virtual
 
+        return 
+
+
+def optimal_Vg(cdd_inv: CddInv, cgd: Cgd_holes, n_charges: VectorList, rcond: float = 1e-3):
+    '''
+    calculate voltage that minimises charge state's energy
+
+    :param cdd_inv: the inverse of the dot to dot capacitance matrix
+    :param cgd: the dot to gate capacitance matrix
+    :param n_charges: the charge state of the dots of shape (n_dot)
+    :return:
+    '''
+    R = np.linalg.cholesky(cdd_inv).T
+    M = np.linalg.pinv(R @ cgd, rcond=rcond) @ R
+    return np.einsum('ij, ...j', M, n_charges)
+
+
+
+def compute_optimal_virtual_gate_matrix(
+        cdd_inv: CddInv, cgd: Cgd_holes, rcond: float = 1e-4) -> np.ndarray:
+    """
+    Function to compute the optimal virtual gate matrix.
+
+    :param cdd_inv: the inverse of the dot to dot capacitance matrix
+    :param cgd: the dot to gate capacitance matrix
+    :param rcond: the rcond parameter for the pseudo inverse
+    :return: the optimal virtual gate matrix
+
+    """
+    n_dot = cdd_inv.shape[0]
+    n_gate = cgd.shape[1]
+    virtual_gate_matrix = -np.linalg.pinv(cdd_inv @ cgd, rcond=rcond)
+
+    # if the number of dots is less than the number of gates then we pad with zeros
+    if n_dot < n_gate:
+        virtual_gate_matrix = np.pad(virtual_gate_matrix, ((0, 0), (0, n_gate - n_dot)), mode='constant')
+
+    return virtual_gate_matrix
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=8)
-    import time
+    experiment = QarrayBaseClass(num_dots=2)
 
-    start = time.time()
-
-    # os.environ['JAX_PLATFORM_NAME'] = 'cpu'  # Force CPU-only execution
-    # os.environ['JAX_PLATFORMS'] = 'cpu'  # Alternative JAX CPU-only setting
-    os.environ['CUDA_VISIBLE_DEVICES'] = '7'
-
-    image = experiment._get_obs([0]*8, [0]*7)['image'][:,:,1]
-    print(time.time() - start)
+    # Test optimal voltage calculation
+    gt = experiment.calculate_ground_truth()
+    print("Optimal voltages:", gt)
     
-    start = time.time()
+    # Test getting observations
+    gate_voltages = [0.0] * experiment.num_dots
+    barrier_voltages = [4.0] * experiment.num_barrier_voltages
 
-    image = experiment._get_obs([0]*8, [0]*7)['image'][:,:,1]
-    print(time.time() - start)
+    obs = experiment._get_obs(gt, barrier_voltages)
+    print("Observation shape:", obs["image"].shape)
+    print("Gate voltages shape:", len(obs["obs_gate_voltages"]))
+    print("Barrier voltages shape:", len(obs["obs_barrier_voltages"]))
 
-    experiment._render_frame(image)
-
+    print(obs["image"].shape)
+    experiment._render_frame(obs["image"][:,:,0])
