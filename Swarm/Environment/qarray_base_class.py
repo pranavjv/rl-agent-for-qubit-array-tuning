@@ -381,9 +381,8 @@ class QarrayBaseClass:
 
         vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)[:-1]
         perfect_virtual_matrix = self.model.compute_optimal_virtual_gate_matrix()
-
-
         vg_optimal_virtual = np.linalg.inv(perfect_virtual_matrix) @ (vg_optimal_physical - self.model.virtual_gate_origin)
+        
         return vg_optimal_virtual
 
 

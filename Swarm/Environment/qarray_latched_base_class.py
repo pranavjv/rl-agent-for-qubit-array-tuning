@@ -18,13 +18,10 @@ import matplotlib
 matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
+
 #NOTE: gates are zero indexed but qarray is one indexed
 
-"""
-todo:
 
-add barrier voltages in _get_obs
-"""
 
 class QarrayBaseClass:
  
@@ -557,74 +554,55 @@ class QarrayBaseClass:
         """
         Get the ground truth for the quantum dot array.
         """
+        ndot = self.num_dots
+        nbarrier = self.num_barrier_voltages
+        cgd = self.model.cgd_full
+        cdd = self.model.cdd_full
+        cdd_inv = self.model.cdd_inv_full
 
-        #TODO: need to change indexing to play well with new setup
+        numsensor = 1
+
+
+        #Assumes Vb = 0
         vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)
 
-        sensor_optimal_physical = vg_optimal_physical[-1]
+        #Assumes perfectly virtualised barriers (this is not the case but since ground truth for barriers is approximate we leave this)
+        tc_ratio = float(self.optimal_tc) / self.barrier_tc_base
 
-        tc_ratio = self.optimal_tc / self.barrier_tc_base
-        vb_mag = max(0.1, -np.log(max(tc_ratio, 0.01)) / np.mean(self.barrier_model.alpha))
+        print(tc_ratio)
+        vb_mag = -np.log(tc_ratio) / self.model.barrier_model.alpha
         vb_optimal = np.full(self.num_barrier_voltages, vb_mag)
 
+        #calculate change in dot potential due to barriers
+        dot_potential = cgd[:ndot+numsensor, -nbarrier:] @ vb_optimal
 
-        perfect_virtual_matrix = self.model.compute_optimal_virtual_gate_matrix()
+        delta_vg = np.linalg.inv(cgd[:ndot+numsensor, :ndot+numsensor]) @ dot_potential
 
-
-        vg_optimal_virtual = np.linalg.inv(perfect_virtual_matrix) @ (vg_optimal_physical - self.model.virtual_gate_origin)
-
-        return 
-
-
-def optimal_Vg(cdd_inv: CddInv, cgd: Cgd_holes, n_charges: VectorList, rcond: float = 1e-3):
-    '''
-    calculate voltage that minimises charge state's energy
-
-    :param cdd_inv: the inverse of the dot to dot capacitance matrix
-    :param cgd: the dot to gate capacitance matrix
-    :param n_charges: the charge state of the dots of shape (n_dot)
-    :return:
-    '''
-    R = np.linalg.cholesky(cdd_inv).T
-    M = np.linalg.pinv(R @ cgd, rcond=rcond) @ R
-    return np.einsum('ij, ...j', M, n_charges)
+        vg_optimal_physical -= delta_vg
+        sensor_optimal_physical = vg_optimal_physical[-numsensor:]
+        plunger_optimal_physical = vg_optimal_physical[:-numsensor]
 
 
+        #note ignoring virtual gate origins here
+        plunger_optimal_virtual = -cdd_inv[:ndot, :ndot] @ cgd[:ndot, :ndot] @ plunger_optimal_physical
 
-def compute_optimal_virtual_gate_matrix(
-        cdd_inv: CddInv, cgd: Cgd_holes, rcond: float = 1e-4) -> np.ndarray:
-    """
-    Function to compute the optimal virtual gate matrix.
+        return plunger_optimal_virtual, vb_optimal, sensor_optimal_physical
 
-    :param cdd_inv: the inverse of the dot to dot capacitance matrix
-    :param cgd: the dot to gate capacitance matrix
-    :param rcond: the rcond parameter for the pseudo inverse
-    :return: the optimal virtual gate matrix
 
-    """
-    n_dot = cdd_inv.shape[0]
-    n_gate = cgd.shape[1]
-    virtual_gate_matrix = -np.linalg.pinv(cdd_inv @ cgd, rcond=rcond)
-
-    # if the number of dots is less than the number of gates then we pad with zeros
-    if n_dot < n_gate:
-        virtual_gate_matrix = np.pad(virtual_gate_matrix, ((0, 0), (0, n_gate - n_dot)), mode='constant')
-
-    return virtual_gate_matrix
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=2)
+    experiment = QarrayBaseClass(num_dots=3, obs_image_size=50)
 
     # Test optimal voltage calculation
-    gt = experiment.calculate_ground_truth()
-    print("Optimal voltages:", gt)
+    gt_vg, gt_vb, gt_vs = experiment.calculate_ground_truth()
+    print(f"Optimal voltages: {gt_vg}, {gt_vs}, {gt_vb}")
     
     # Test getting observations
     gate_voltages = [0.0] * experiment.num_dots
     barrier_voltages = [4.0] * experiment.num_barrier_voltages
 
-    obs = experiment._get_obs(gt, barrier_voltages)
+    obs = experiment._get_obs(gt_vg, gt_vb)
     print("Observation shape:", obs["image"].shape)
     print("Gate voltages shape:", len(obs["obs_gate_voltages"]))
     print("Barrier voltages shape:", len(obs["obs_barrier_voltages"]))

@@ -82,12 +82,12 @@ simulator:
     Cbg:
       distance_coupling:
         1: {"min": 0.08, "max": 0.15}    # Adjacent barrier-gate
-        2: {"min": 0.03, "max": 0.08}    # Next-adjacent barrier-gate
+        2: {"min": 0.03, "max": 0.18}    # Next-adjacent barrier-gate
         3_plus: {"min": 0.01, "max": 0.03}  # Long-range barrier-gate
     
     # Barrier-to-sensor capacitance matrix (Cbs) - (n_sensor, n_barrier) matrix
     Cbs:
-      coupling: {"min": 0.02, "max": 0.05}
+      coupling: {"min": 0.0003, "max": 0.001}
     
     # Barrier-to-barrier capacitance matrix (Cbb) - (n_barrier, n_barrier) matrix
     Cbb:
@@ -112,12 +112,12 @@ simulator:
     # Implementation for charge stability diagram
     implementation: "jax"
     # Maximum number of charge carriers
-    max_charge_carriers: 5
+    max_charge_carriers: 4
 
   measurement:
     #model.optimal_Vg(center) gives the optimal gate voltage in volts from desired charge occupancy
     optimal_VG_center: {"dots": 1.0, "sensor": 0.45}
 
     #target tunnel coupling
-    tc: 1e3
+    tc: 1e-1
 
