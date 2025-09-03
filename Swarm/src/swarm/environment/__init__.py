@@ -8,7 +8,4 @@ using the qarray library for realistic device simulation.
 from .env import QuantumDeviceEnv
 from .qarray_base_class import QarrayBaseClass
 
-__all__ = [
-    'QuantumDeviceEnv',
-    'QarrayBaseClass'
-]
+__all__ = ["QuantumDeviceEnv", "QarrayBaseClass"]
