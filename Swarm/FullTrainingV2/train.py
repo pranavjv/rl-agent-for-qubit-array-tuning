@@ -82,7 +82,6 @@ def main():
         "log_to_driver": False,  # Reduce driver logs
         "logging_level": logging.WARNING,  # Set Ray logging level
         "runtime_env": {
-            #"working_dir": str(swarm_dir),
             "py_modules": [
                 str(swarm_dir / "Environment"),
                 str(swarm_dir / "CapacitanceModel")
