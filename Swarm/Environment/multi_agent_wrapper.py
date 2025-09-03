@@ -43,7 +43,7 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
     The wrapper combines individual agent actions into global environment actions.
     """
     
-    def __init__(self, num_dots: int, training: bool = True, gpu: str | int = 'auto', capacitance_model=None):
+    def __init__(self, training: bool = True, gpu: str | int = 'auto', capacitance_model=None): #"fake"):
         """
         Initialize multi-agent wrapper.
 
@@ -54,10 +54,12 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
         """
         super().__init__()
 
-        self.base_env = QuantumDeviceEnv(num_dots=num_dots, training=training, gpu=gpu, capacitance_model=capacitance_model)
-        self.num_gates = num_dots
-        self.num_barriers = num_dots - 1
-        self.num_image_channels = num_dots - 1  # N-1 charge stability diagrams
+        self.base_env = QuantumDeviceEnv(training=training, gpu=gpu, capacitance_model=capacitance_model)
+
+
+        self.num_gates = self.base_env.num_dots
+        self.num_barriers = self.base_env.num_dots - 1
+        self.num_image_channels = self.base_env.num_dots - 1  # N-1 charge stability diagrams
 
         # Create agent IDs (0-indexed to match expected format)
         self.gate_agent_ids = [f"plunger_{i}" for i in range(self.num_gates)]
@@ -123,19 +125,6 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
         
         # Gate agents: 2-channel images + single voltage
         for agent_id in self.gate_agent_ids:
-            # self.observation_spaces[agent_id] = spaces.Dict({
-            #     'image': spaces.Box(
-            #         low=0.0, high=1.0,
-            #         shape=(image_shape[0], image_shape[1], 2),  # 2 channels
-            #         dtype=np.float32
-            #     ),
-            #     'voltage': spaces.Box(
-            #         low=gate_low, high=gate_high,
-            #         shape=(1,),  # Single voltage value
-            #         dtype=np.float32
-            #     )
-            # })
-            # IMAGE ONLY SPACE
             self.observation_spaces[agent_id] = spaces.Box(
                 low=0.0, high=1.0,
                 shape=(image_shape[0], image_shape[1], 2),  # 2 channels
@@ -150,19 +139,6 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
         
         # Barrier agents: 1-channel images + single voltage
         for agent_id in self.barrier_agent_ids:
-            # self.observation_spaces[agent_id] = spaces.Dict({
-            #     'image': spaces.Box(
-            #         low=0.0, high=1.0,
-            #         shape=(image_shape[0], image_shape[1], 1),  # 1 channel
-            #         dtype=np.float32
-            #     ),
-            #     'voltage': spaces.Box(
-            #         low=barrier_low, high=barrier_high,
-            #         shape=(1,),  # Single voltage value
-            #         dtype=np.float32
-            #     )
-            # })
-            # IMAGE ONLY SPACE
             self.observation_spaces[agent_id] = spaces.Box(
                 low=0.0, high=1.0,
                 shape=(image_shape[0], image_shape[1], 1),  # 1 channel
@@ -382,30 +358,25 @@ if __name__ == "__main__":
     print("=== Testing Multi-Agent Quantum Wrapper ===")
     
     try:
-        # Create base environment
-        base_env = QuantumDeviceEnv(training=True)
-        print("✓ Created base environment")
-        
-        # Create wrapper
-        wrapper = MultiAgentQuantumWrapper(base_env, num_quantum_dots=4)  # Small test
+        # Create wrapper (no need for separate base_env)
+        wrapper = MultiAgentQuantumWrapper(num_dots=4, training=True)  # Small test
         print("✓ Created multi-agent wrapper")
         
-        print(f"Agent IDs: {wrapper.get_agent_ids}")
+        print(f"Agent IDs: {wrapper.get_agent_ids()}")
         
         # Test reset
         obs, info = wrapper.reset()
         print(f"✓ Reset successful - got observations for {len(obs)} agents")
         
         # Check observation shapes
-        for agent_id in wrapper.get_agent_ids[:2]:  # Check first 2 agents
+        for agent_id in wrapper.get_agent_ids()[:2]:  # Check first 2 agents
             agent_obs = obs[agent_id]
             print(f"  {agent_id}:")
-            print(f"    Image shape: {agent_obs['image'].shape}")
-            print(f"    Voltage shape: {agent_obs['voltage'].shape}")
+            print(f"    Observation shape: {agent_obs.shape}")
         
         # Test step with random actions
         actions = {}
-        for agent_id in wrapper.get_agent_ids:
+        for agent_id in wrapper.get_agent_ids():
             actions[agent_id] = wrapper.action_spaces[agent_id].sample()
         
         obs, rewards, terminated, truncated, info = wrapper.step(actions)

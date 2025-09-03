@@ -7,16 +7,23 @@ import sys
 import os
 from pathlib import Path
 
-# # Add paths for imports
-# current_dir = Path(__file__).parent.parent
-# swarm_dir = current_dir.parent  # Get Swarm directory
-# sys.path.append(str(swarm_dir))
-
-#from custom_catalog import CustomCatalog
 try:
     from custom_image_catalog import CustomImageCatalog
 except ModuleNotFoundError:
     from utils.custom_image_catalog import CustomImageCatalog
+
+
+def policy_mapping_fn(agent_id: str, episode=None, **kwargs) -> str:
+    """Map agent IDs to policy IDs. Ray 2.49.0 passes agent_id and episode."""
+    if agent_id.startswith("plunger") or "plunger" in agent_id.lower():
+        return "plunger_policy"
+    elif agent_id.startswith("barrier") or "barrier" in agent_id.lower():
+        return "barrier_policy"
+    else:
+        raise ValueError(
+            f"Agent ID '{agent_id}' must contain 'plunger' or 'barrier' to determine policy type. "
+            f"Expected format: 'plunger_X' or 'barrier_X' where X is the agent number."
+        )
 
 def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
     """
@@ -33,12 +40,9 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
     import numpy as np
     
     # Get full environment spaces from base environment
-    # Multi-agent wrapper preserves original spaces as base_observation_space and base_action_space
-    if hasattr(env_instance, 'base_observation_space'):
-        full_obs_space = env_instance.base_observation_space
-        full_action_space = env_instance.base_action_space
-    else:
-        raise ValueError("Training attempted on a non-wrapped environment")
+    full_obs_space = env_instance.base_observation_space
+    full_action_space = env_instance.base_action_space
+    
     
     # Extract dimensions from environment
     image_shape = full_obs_space['image'].shape  # (H, W, channels)
@@ -52,20 +56,7 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
     barrier_high = full_action_space['action_barrier_voltages'].high[0]
     
     # Create observation space for gate agents
-    # Each gate agent sees: dual-channel image + single voltage value
-    # gate_obs_space = spaces.Dict({
-    #     'image': spaces.Box(
-    #         low=0.0, high=1.0,
-    #         shape=(image_shape[0], image_shape[1], 2),  # Dual channel for gate agents
-    #         dtype=np.float32
-    #     ),
-    #     'voltage': spaces.Box(
-    #         low=gate_low, high=gate_high,
-    #         shape=(1,),  # Single voltage value
-    #         dtype=np.float32
-    #     )
-    # })
-    # IMAGE ONLY SPACE
+
     gate_obs_space = spaces.Box(
         low=0.0, high=1.0,
         shape=(image_shape[0], image_shape[1], 2),  # Dual channel for gate agents
@@ -110,53 +101,39 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
         )
     
     # Create model config for custom RLModule
-    # model_config=DefaultModelConfig(
-    #     use_lstm=True,
-    #     lstm_cell_size=128, # default for now
-    #     lstm_use_prev_action=True,
-    #     lstm_use_prev_reward=False, # must not set this to true
-    # )
+
     model_config = {
         "max_seq_len": 50,
         "batch_mode": "complete_episodes",
-
-        "use_lstm": True,
+        "use_lstm": False,
         "lstm_cell_size": 128,
         "lstm_use_prev_action": True,
         "lstm_use_prev_reward": False,
     }
     
-    # Create single agent RLModule specs
+    # Create single agent RLModule specs using new API
     plunger_spec = RLModuleSpec(
-        #module_class=SingleAgentRecurrentPPOModel,
-        module_class=DefaultPPOTorchRLModule, # uses the default TorchRLModule
-        #catalog_class=CustomCatalog,
-        #catalog_class=PPOCatalog,
-        catalog_class=CustomImageCatalog,
+        module_class=DefaultPPOTorchRLModule,
         observation_space=gate_obs_space,
         action_space=gate_action_space,
         model_config=model_config,
-        learner_only=False  # Allow inference on EnvRunners
+        catalog_class=CustomImageCatalog,
+        inference_only=False,
     )
     
     barrier_spec = RLModuleSpec(
-        #module_class=SingleAgentRecurrentPPOModel,
-        module_class=DefaultPPOTorchRLModule, # uses the default TorchRLModule
-        #catalog_class=CustomCatalog,
-        #catalog_class=PPOCatalog,
-        catalog_class=CustomImageCatalog,
+        module_class=DefaultPPOTorchRLModule,
         observation_space=barrier_obs_space,
         action_space=barrier_action_space,
         model_config=model_config,
-        learner_only=False  # Allow inference on EnvRunners
+        catalog_class=CustomImageCatalog,
+        inference_only=False,
     )
 
     # Create multi-agent RLModule spec
     rl_module_spec = MultiRLModuleSpec(
-        rl_module_specs={
-            "plunger_policy": plunger_spec,
-            "barrier_policy": barrier_spec,
-        }
+        rl_module_specs={"plunger_policy": plunger_spec,
+                        "barrier_policy": barrier_spec}
     )
 
     return rl_module_spec

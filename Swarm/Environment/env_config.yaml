@@ -7,18 +7,18 @@ simulator:
   # Tolerance from ground truth when we are done
   tolerance: 0.5
 
-  num_dots: 4
+  num_dots: 8
   
 
   measurement:
     # Voltage sweep ranges for charge stability diagram
-    gate_voltage_sweep_range: {"min": -2.0, "max": 2.0}
+    gate_voltage_sweep_range: {"min": -1.0, "max": 1.0}
     # Total gate voltage range
-    gate_voltage_range: {"min": -5.0, "max": 5.0}
+    gate_voltage_range: {"min": -7.5, "max": 7.5}
     # Total barrier voltage range
     barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO
     # resolution for simulator images
-    resolution: 128
+    resolution: 100
 
 init:
   debug: false

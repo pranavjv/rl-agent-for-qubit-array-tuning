@@ -379,9 +379,13 @@ class QarrayBaseClass:
         Get the ground truth for the quantum dot array.
         """
 
-        vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)[:-1]
+        vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)
         perfect_virtual_matrix = self.model.compute_optimal_virtual_gate_matrix()
-        vg_optimal_virtual = np.linalg.inv(perfect_virtual_matrix) @ (vg_optimal_physical - self.model.virtual_gate_origin)
+
+        #removed - self.model.virtual_gate_origin
+        vg_optimal_virtual = np.linalg.inv(perfect_virtual_matrix) @ (vg_optimal_physical)
+
+        vg_optimal_virtual = vg_optimal_virtual[:-1]
         
         return vg_optimal_virtual
 
