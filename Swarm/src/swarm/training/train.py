@@ -29,21 +29,23 @@ logging.getLogger("ray.rllib").setLevel(logging.WARNING)
 
 # Add current directory to path for imports
 current_dir = Path(__file__).parent
-swarm_dir = current_dir.parent  # Get Swarm directory
-sys.path.append(str(swarm_dir))
+swarm_package_dir = current_dir.parent  # Get swarm package directory (/path/to/swarm)
+swarm_src_dir = swarm_package_dir.parent  # Get src directory (/path/to/src)
+swarm_root_dir = swarm_src_dir.parent  # Get Swarm root directory
+sys.path.append(str(swarm_src_dir))
 
-from utils.metrics_logger import (  # noqa: E402
+from swarm.training.utils.metrics_logger import (  # noqa: E402
     log_to_wandb,
     print_training_progress,
     setup_wandb_metrics,
     upload_checkpoint_artifact,
 )
-from utils.policy_mapping import create_rl_module_spec, policy_mapping_fn  # noqa: E402
+from swarm.training.utils.policy_mapping import create_rl_module_spec, policy_mapping_fn  # noqa: E402
 
 
 def create_env(config=None):
     """Create multi-agent quantum environment."""
-    from Environment.multi_agent_wrapper import MultiAgentQuantumWrapper
+    from swarm.environment.multi_agent_wrapper import MultiAgentQuantumWrapper
 
     # Wrap in multi-agent wrapper (config unused but required by RLlib)
     return MultiAgentQuantumWrapper(training=True)
@@ -80,15 +82,12 @@ def main():
         "log_to_driver": False,  # Reduce driver logs
         "logging_level": logging.WARNING,  # Set Ray logging level
         "runtime_env": {
-            "py_modules": [
-                str(swarm_dir / "Environment"),
-                str(swarm_dir / "CapacitanceModel"),
-            ],
-            "excludes": ["dataset", "dataset_v1", "wandb", "outputs", "test_outputs"],
+            "working_dir": str(swarm_src_dir),
+            "excludes": ["dataset", "dataset_v1", "wandb", "outputs", "test_outputs", "checkpoints"],
             "env_vars": {
-                "JAX_PLATFORM_NAME": "cuda",
+                "JAX_PLATFORM_NAME": "cuda", 
                 "JAX_PLATFORMS": "cuda",
-                "SWARM_PROJECT_ROOT": str(swarm_dir),
+                "SWARM_PROJECT_ROOT": str(swarm_root_dir),
                 "PYTHONWARNINGS": "ignore::DeprecationWarning",
                 "RAY_DEDUP_LOGS": "0",
                 "RAY_DISABLE_IMPORT_WARNING": "1",
@@ -120,7 +119,7 @@ def main():
                 rl_module_spec=rl_module_spec,
             )
             .env_runners(
-                num_env_runners=5,
+                num_env_runners=8,
                 rollout_fragment_length=50,
                 sample_timeout_s=600.0,
                 num_gpus_per_env_runner=0.6,

@@ -4,7 +4,7 @@ from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import (
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec, RLModuleSpec
 
 try:
-    from custom_image_catalog import CustomImageCatalog
+    from swarm.training.utils.custom_image_catalog import CustomImageCatalog
 except ModuleNotFoundError:
     from utils.custom_image_catalog import CustomImageCatalog
 

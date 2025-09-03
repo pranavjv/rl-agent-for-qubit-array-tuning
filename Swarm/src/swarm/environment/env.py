@@ -38,20 +38,20 @@ matplotlib.use("Agg")
 
 # Import capacitance model components
 try:
-    from ..CapacitanceModel import CapacitancePredictionModel, CapacitancePredictor
+    from ..capacitance_model import CapacitancePredictionModel, CapacitancePredictor
 except ImportError:
     # Fallback for direct execution - try absolute imports with path adjustment
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)  # Swarm directory
+        parent_dir = os.path.dirname(current_dir)  # swarm package directory
         if parent_dir not in sys.path:
             sys.path.insert(0, parent_dir)
-        from CapacitanceModel.BayesianUpdater import CapacitancePredictor
-        from CapacitanceModel.CapacitancePrediction import CapacitancePredictionModel
+        from capacitance_model.BayesianUpdater import CapacitancePredictor
+        from capacitance_model.CapacitancePrediction import CapacitancePredictionModel
     except ImportError:
         # Final fallback - individual module imports with path adjustment
         try:
-            capacitance_dir = os.path.join(parent_dir, "CapacitanceModel")
+            capacitance_dir = os.path.join(parent_dir, "capacitance_model")
             if capacitance_dir not in sys.path:
                 sys.path.insert(0, capacitance_dir)
             from BayesianUpdater import CapacitancePredictor
