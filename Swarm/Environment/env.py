@@ -21,6 +21,15 @@ except ImportError:
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
         from qarray_base_class import QarrayBaseClass
+try:
+    from fake_capacitance_model import fake_capacitance_model
+except ImportError:
+    # Fallback: add current directory to path and import
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+    from fake_capacitance_model import fake_capacitance_model
+
 
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
@@ -58,7 +67,7 @@ class QuantumDeviceEnv(gym.Env):
     Simulator environment that handles all env related logic
     loads in the qarray/ device model to extract observations
     """
-    def __init__(self, num_dots=None, training=True, gpu='auto', capacitance_model=None, config_path="env_config.yaml"):
+    def __init__(self, training=True, gpu='auto', capacitance_model=None, config_path="env_config.yaml"):
         """
         Setup for the base qarray environment class
 
@@ -69,7 +78,7 @@ class QuantumDeviceEnv(gym.Env):
 
         self.config = self._load_config(config_path)
         self.training = training # if we are training or not
-        self.num_dots = num_dots if num_dots else self.config['simulator']['num_dots']
+        self.num_dots = self.config['simulator']['num_dots']
 
         # Assign the correct env device
         if gpu=='auto':
@@ -143,23 +152,10 @@ class QuantumDeviceEnv(gym.Env):
             )
         })
 
-        # Initialize capacitance prediction model
-        if capacitance_model is None:
-            self._init_capacitance_model()
-        else:
-            try:
-                bayesian_predictor = CapacitancePredictor(
-                    n_dots=self.num_dots,
-                    prior_config=distance_prior
-                )
-                self.capacitance_model = {
-                    "ml_model": capacitance_model["ml_model"],
-                    "bayesian_predictor": bayesian_predictor,
-                    "device": capacitance_model["ml_model"].device
-                }
-            except Exception as e:
-                print(f"Invalid capacitance model: {e}")
-                raise
+        #None if we want to load in, flag saying fake if fake
+        self.capacitance_model = capacitance_model
+        # Initialize capacitance prediction model  
+        #self._init_capacitance_model()
 
         self.reset()
 
@@ -305,16 +301,13 @@ class QuantumDeviceEnv(gym.Env):
         max_barrier_distance = self.barrier_voltage_max - self.barrier_voltage_min # always gives reward
 
 
-        if self.current_step == self.max_steps:
-            gate_rewards = (1 - gate_distances / max_gate_distance) * 100
-            barrier_rewards = (1 - barrier_distances / max_barrier_distance) * 100
-        else:
-            gate_rewards = np.zeros_like(gate_distances)
-            barrier_rewards = np.zeros_like(barrier_distances)
+        gate_rewards = (1 - gate_distances / max_gate_distance) 
+        barrier_rewards = (1 - barrier_distances / max_barrier_distance) 
+
 
         
-        gate_rewards = gate_rewards - self.current_step * 0.1
-        barrier_rewards = barrier_rewards - self.current_step * 0.1
+        #gate_rewards = gate_rewards - self.current_step * 0.1
+        #barrier_rewards = barrier_rewards - self.current_step * 0.1
 
         at_target = gate_distances <= self.tolerance
 
@@ -385,6 +378,11 @@ class QuantumDeviceEnv(gym.Env):
         if self.capacitance_model is None:
             return  # Skip if capacitance model not available
             
+        if self.capacitance_model == "fake":
+            cgd_estimate = fake_capacitance_model(self.current_step, self.max_steps, self.array.model.cgd)
+            self.array._update_virtual_gate_matrix(cgd_estimate)
+            return
+ 
         # Get the multi-channel scan: shape (resolution, resolution, num_dots-1)
         image = obs["image"]  # Each channel is one dot pair's charge stability diagram
         
@@ -416,7 +414,7 @@ class QuantumDeviceEnv(gym.Env):
             
 
             # Create ml_outputs format expected by update_from_scan
-            ml_outputs = [absolute_values, float(log_vars_np[i, j]) for j in range(3)]
+            ml_outputs = [(absolute_values[j], float(log_vars_np[i, j])) for j in range(3)]
             
             # Update the Bayesian predictor for this dot pair
             self.capacitance_model['bayesian_predictor'].update_from_scan((i, i+1), ml_outputs)
@@ -462,6 +460,9 @@ class QuantumDeviceEnv(gym.Env):
         posterior tracking of capacitance matrix elements.
         """
         try:
+            if self.capacitance_model == "fake":
+                return
+
             # Determine device (GPU if available, otherwise CPU)
             if torch.cuda.is_available():
                 if self.gpu == 'auto':
@@ -476,7 +477,7 @@ class QuantumDeviceEnv(gym.Env):
             # Initialize the neural network model
             ml_model = CapacitancePredictionModel()
             
-            # Load pre-trained weights - use absolute path from project root
+            
             if 'SWARM_PROJECT_ROOT' in os.environ:
                 # Ray distributed mode: use environment variable set by training script
                 swarm_dir = os.environ['SWARM_PROJECT_ROOT']
@@ -487,10 +488,10 @@ class QuantumDeviceEnv(gym.Env):
             weights_path = os.path.join(
                 swarm_dir,
                 'CapacitanceModel', 
-                'artifacts', 
+                'outputs', 
                 'best_model.pth'
             )
-            
+
             if not os.path.exists(weights_path):
                 raise FileNotFoundError(f"Model weights not found at: {weights_path}")
             

@@ -5,13 +5,12 @@ Enhanced with comprehensive memory usage logging.
 """
 import os
 import sys
+import warnings
 from typing import Any, Optional
 
-# Configure JAX to use CPU-only before any other imports
-os.environ['JAX_PLATFORM_NAME'] = 'cpu'
-os.environ['JAX_PLATFORMS'] = 'cpu'
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.25'
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+# Suppress Ray warnings and verbose output
+os.environ["PYTHONWARNINGS"] = "ignore::DeprecationWarning"
+os.environ["RAY_DEDUP_LOGS"] = "0"
 
 import argparse
 from pathlib import Path
@@ -28,40 +27,26 @@ import logging
 from datetime import datetime
 import wandb
 
+# Set logging level to reduce verbosity
+logging.getLogger("ray").setLevel(logging.WARNING)
+logging.getLogger("ray.tune").setLevel(logging.WARNING)
+logging.getLogger("ray.rllib").setLevel(logging.WARNING)
+
 # Add current directory to path for imports
 current_dir = Path(__file__).parent
 swarm_dir = current_dir.parent  # Get Swarm directory
 sys.path.append(str(swarm_dir))
 
-from utils.policy_mapping import create_rl_module_spec
-from utils.logging_utils import (
-    log_memory_usage_wandb, memory_checkpoint_wandb, log_training_metrics_wandb,
-    setup_memory_logging, log_memory_usage, memory_checkpoint
-)
-from metrics_utils import extract_training_metrics
+from utils.policy_mapping import create_rl_module_spec, policy_mapping_fn
+from utils.metrics_logger import print_training_progress, log_to_wandb, setup_wandb_metrics, upload_checkpoint_artifact
 
 
 def create_env(config=None):
     """Create multi-agent quantum environment."""
     from Environment.multi_agent_wrapper import MultiAgentQuantumWrapper
 
-    num_quantum_dots = config["num_quantum_dots"]    
-    # Wrap in multi-agent wrapper
-    return MultiAgentQuantumWrapper(num_quantum_dots=num_quantum_dots, training=True)
-
-
-def policy_mapping_fn(agent_id: str, episode=None, **kwargs) -> str:
-    """Map agent IDs to policy IDs. Ray 2.49.0 passes agent_id and episode."""
-    if agent_id.startswith("plunger") or "plunger" in agent_id.lower():
-        return "plunger_policy"
-    elif agent_id.startswith("barrier") or "barrier" in agent_id.lower():
-        return "barrier_policy"
-    else:
-        raise ValueError(
-            f"Agent ID '{agent_id}' must contain 'plunger' or 'barrier' to determine policy type. "
-            f"Expected format: 'plunger_X' or 'barrier_X' where X is the agent number."
-        )
-
+    # Wrap in multi-agent wrapper (config unused but required by RLlib)
+    return MultiAgentQuantumWrapper(training=True)
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -76,59 +61,56 @@ def parse_arguments():
 
 def main():
     """Main training function using Ray RLlib 2.49.0 modern API with wandb logging."""
+    
     args = parse_arguments()
     
     # Initialize Weights & Biases if not disabled
     if not args.disable_wandb:
-        run_name = f"qarray-{args.num_quantum_dots}dots-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         wandb.init(
             entity="rl_agents_for_tuning",
             project="RLModel",
-            name=run_name,
-            config={
-                "num_quantum_dots": args.num_quantum_dots,
-                "num_iterations": args.num_iterations,
-                "num_gpus": args.num_gpus,
-            }
+            config={}
+            
         )
-        memory_checkpoint_wandb("STARTUP", "Training script started")
+        setup_wandb_metrics()
     else:
         print("Wandb logging disabled")
-        # Still setup basic memory logging for console output
-        memory_logger = setup_memory_logging()
-        memory_checkpoint(memory_logger, "STARTUP", "Training script started")
-    
-    # Set environment variables for Ray
-    os.environ['RAY_DISABLE_IMPORT_WARNING'] = '1'
-    
-    # Add VoltageAgent to path for custom RLModule
-    sys.path.append(str(swarm_dir / "VoltageAgent"))
     
     # Initialize Ray with runtime environment
     ray_config = {
         "include_dashboard": False,
+        "log_to_driver": False,  # Reduce driver logs
+        "logging_level": logging.WARNING,  # Set Ray logging level
         "runtime_env": {
-            "working_dir": str(swarm_dir),
+            #"working_dir": str(swarm_dir),
             "py_modules": [
                 str(swarm_dir / "Environment"),
-                str(swarm_dir / "VoltageAgent")
+                str(swarm_dir / "CapacitanceModel")
+            ],
+            "excludes": [
+                "dataset",
+                "dataset_v1",
+                "wandb",
+                "outputs",
+                "test_outputs"
             ],
             "env_vars": {
-                "JAX_PLATFORM_NAME": "cpu",
-                "JAX_PLATFORMS": "cpu",
-                "XLA_PYTHON_CLIENT_MEM_FRACTION": "0.25",
-                "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+                "JAX_PLATFORM_NAME": "cuda",
+                "JAX_PLATFORMS": "cuda",
+                "SWARM_PROJECT_ROOT": str(swarm_dir),
+                "PYTHONWARNINGS": "ignore::DeprecationWarning",
+                "RAY_DEDUP_LOGS": "0",
+                "RAY_DISABLE_IMPORT_WARNING": "1"
             }
         }
     }
     
-    start_time = time.time()
+    print("\nInitialising ray...\n")
     ray.init(**ray_config)
-    ray_init_time = time.time() - start_time
     
     try:
         register_env("qarray_multiagent_env", create_env)
-        env_instance = create_env({"num_quantum_dots": args.num_quantum_dots})
+        env_instance = create_env()
 
         rl_module_spec = create_rl_module_spec(env_instance)
 
@@ -136,43 +118,46 @@ def main():
             PPOConfig()
             .environment(
                 env="qarray_multiagent_env", 
-                env_config={"num_quantum_dots": args.num_quantum_dots}
             )
             .multi_agent(
                 policy_mapping_fn=policy_mapping_fn,
                 policies=["plunger_policy", "barrier_policy"],
-                policies_to_train=["plunger_policy", "barrier_policy"]
+                policies_to_train=["plunger_policy", "barrier_policy"],
+                count_steps_by="agent_steps"
             )
             .rl_module(
                 rl_module_spec=rl_module_spec,
             )
             .env_runners(
-                num_env_runners=40,
-                rollout_fragment_length='auto',
-                sample_timeout_s=60.0,
+                num_env_runners=5,
+                rollout_fragment_length=50,
+                sample_timeout_s=600.0,
+                num_gpus_per_env_runner=0.6,
+            )
+            .learners(
+                num_learners=1,
+                num_gpus_per_learner=0.75
             )
             .training(
-                train_batch_size=64,
-                minibatch_size=8,
+                train_batch_size=4096,
+                minibatch_size=64,
                 lr=3e-4,
                 gamma=0.99,
                 lambda_=0.95,
                 clip_param=0.2,
                 entropy_coeff=0.01,
                 vf_loss_coeff=0.5,
-                num_sgd_iter=4  # Fewer SGD iterations to speed up training
+                num_epochs=10  
             )
             .resources(
-                num_gpus=4
+                num_gpus=8
             )
         )
 
         # Build the algorithm
         print("\nBuilding PPO algorithm...\n")
-        
-        start_time = time.time()
+    
         algo = config.build_algo() # creates a PPO object
-        build_time = time.time() - start_time
         
         # Clean up the environment instance used for spec creation
         env_instance.close()
@@ -180,41 +165,32 @@ def main():
         
         print(f"\nStarting training for {args.num_iterations} iterations...\n")
         
-        for i in range(args.num_iterations):
-            iteration_start_time = time.time()
-            
-            try:
-                result = algo.train()
-                iteration_time = time.time() - iteration_start_time
-                print(result)
-                
-                # Extract focused training metrics
-                metrics = extract_training_metrics(result, iteration_time)
-                
-                # Log metrics to wandb or console
-                if not args.disable_wandb:
-                    log_training_metrics_wandb(metrics, i)
-                    # Log memory usage every iteration for the first 5, then every 10
-                    if i < 5 or i % 10 == 0:
-                        memory_checkpoint_wandb(f"ITERATION_{i}_COMPLETE", 
-                                              f"Iteration {i} completed in {iteration_time:.2f} seconds", step=i)
-                else:
-                    # Fallback logging to console and file
-                    if i < 5 or i % 10 == 0:
-                        memory_checkpoint(memory_logger, f"ITERATION_{i}_COMPLETE", 
-                                        f"Iteration {i} completed in {iteration_time:.2f} seconds")
-                
-                # Console output for all modes
-                print(f"Iteration {i:3d}: {metrics['summary']}")
-                
-            except Exception as e:
-                error_msg = f"Error in iteration {i}: {str(e)}"
-                raise
+        training_start_time = time.time()
+        best_reward = float('-inf')  # Track best performance for artifact upload
         
-        # Save final checkpoint
-        checkpoint_path = algo.save()
+        for i in range(args.num_iterations):
+            result = algo.train()
+            
+            # Clean console output and wandb logging
+            print_training_progress(result, i, training_start_time)
+            
+            # Log metrics to wandb
+            if not args.disable_wandb:
+                log_to_wandb(result, i)
+                
+            # Save checkpoint using modern RLlib API  
+            local_checkpoint_dir = Path("./checkpoints") / f"iteration_{i+1}"
+            local_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_path = algo.save_to_path(str(local_checkpoint_dir.absolute()))
 
-        print(f"\nTraining completed. Checkpoint saved to: {checkpoint_path}\n")
+            # Upload checkpoint as wandb artifact if performance improved
+            if not args.disable_wandb:
+                current_reward = result.get("env_runners", {}).get("episode_return_mean", float('-inf'))
+                if current_reward is not None and current_reward > best_reward:
+                    best_reward = current_reward
+                    upload_checkpoint_artifact(checkpoint_path, i+1, current_reward)
+
+            print(f"\nIteration {i+1} completed. Checkpoint saved to: {checkpoint_path}\n")
         
     finally:
         if ray.is_initialized():
@@ -223,10 +199,7 @@ def main():
         if not args.disable_wandb:
             wandb.finish()
             print("Wandb session finished")
-        else:
-            memory_logger.info("=" * 100)
-            memory_logger.info("TRAINING SESSION COMPLETED")
-            memory_logger.info("=" * 100)
+
 
 
 if __name__ == "__main__":
