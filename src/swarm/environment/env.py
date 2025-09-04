@@ -210,6 +210,14 @@ class QuantumDeviceEnv(gym.Env):
 
         # --- Reset the environment's state ---
         self.current_step = 0
+        self.array = QarrayBaseClass(
+            num_dots=self.num_dots,
+            obs_voltage_min=self.obs_voltage_min,
+            obs_voltage_max=self.obs_voltage_max,
+            obs_image_size=self.obs_image_size,
+            debug=self.debug,
+        )
+
 
         # --- Get random initial scaling and position ---
         self._init_random_action_scaling()
