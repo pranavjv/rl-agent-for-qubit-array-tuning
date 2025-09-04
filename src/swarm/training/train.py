@@ -42,6 +42,9 @@ from swarm.training.utils import (  # noqa: E402
     policy_mapping_fn,
 )
 
+from swarm.voltage_model import create_rl_module_spec
+
+
 
 def create_env(config=None):
     """Create multi-agent quantum environment."""
@@ -96,7 +99,6 @@ def main():
         register_env("qarray_multiagent_env", create_env)
         env_instance = create_env()
 
-        from swarm.voltage_model import create_rl_module_spec
         
         rl_module_spec = create_rl_module_spec(env_instance)
 

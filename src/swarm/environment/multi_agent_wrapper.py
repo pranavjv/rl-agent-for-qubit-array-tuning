@@ -180,11 +180,20 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
         global_image = global_obs["image"]  # Shape: (H, W, N-1)
 
         if len(channels) == 2:
-            # Gate agent: 2 channels
-            agent_image = np.stack(
-                [global_image[:, :, channels[0]], global_image[:, :, channels[1]]],
-                axis=2,
-            )
+            # Gate agent: 2 channels with conditional y-axis flipping
+            agent_idx = int(agent_id.split("_")[1])
+            img1 = global_image[:, :, channels[0]]
+            img2 = global_image[:, :, channels[1]]
+            
+            if agent_idx == 0:
+                # First agent: no flipping
+                agent_image = np.stack([img1, img2], axis=2)
+            elif agent_idx == self.num_gates - 1:
+                # Final agent: flip both images
+                agent_image = np.stack([np.flipud(img1), np.flipud(img2)], axis=2)
+            else:
+                # Middle agents: flip only second image
+                agent_image = np.stack([img1, np.flipud(img2)], axis=2)
         else:
             # Barrier agent: 1 channel
             agent_image = global_image[:, :, channels[0] : channels[0] + 1]
