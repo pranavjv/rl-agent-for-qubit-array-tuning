@@ -119,7 +119,7 @@ def main():
                 rl_module_spec=rl_module_spec,
             )
             .env_runners(
-                num_env_runners=8,
+                num_env_runners=5,
                 rollout_fragment_length=50,
                 sample_timeout_s=600.0,
                 num_gpus_per_env_runner=0.6,
