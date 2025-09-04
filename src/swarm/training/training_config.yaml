@@ -1,0 +1,80 @@
+# Training Configuration for Multi-Agent RL Quantum Device Tuning
+# This file contains all configurable parameters for the training pipeline
+
+# Default training parameters
+defaults:
+  num_iterations: 100        # Total training iterations
+  num_gpus: 8                # Default number of GPUs to use
+
+# Weights & Biases configuration
+wandb:
+  entity: "rl_agents_for_tuning"
+  project: "RLModel"
+
+# Ray cluster configuration
+ray:
+  include_dashboard: false   # Disable Ray dashboard for cleaner output
+  log_to_driver: false      # Reduce driver logs
+  logging_level: 30         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
+  
+  # Runtime environment settings
+  runtime_env:
+    excludes:
+      - "dataset"
+      - "dataset_v1" 
+      - "wandb"
+      - "outputs"
+      - "test_outputs"
+      - "checkpoints"
+    
+    env_vars:
+      JAX_PLATFORM_NAME: "cuda"
+      JAX_PLATFORMS: "cuda"
+      PYTHONWARNINGS: "ignore::DeprecationWarning"
+      RAY_DEDUP_LOGS: "0"
+      RAY_DISABLE_IMPORT_WARNING: "1"
+
+# PPO Algorithm Configuration
+ppo:
+  # Environment runners configuration
+  env_runners:
+    num_env_runners: 5              # Number of parallel environment runners
+    rollout_fragment_length: 50     # Steps per rollout fragment
+    sample_timeout_s: 600.0         # Timeout for sampling
+    num_gpus_per_env_runner: 0.6    # GPU allocation per runner
+
+  # Learner configuration  
+  learners:
+    num_learners: 1                 # Number of learner workers
+    num_gpus_per_learner: 0.75      # GPU allocation per learner
+
+  # Training hyperparameters
+  training:
+    train_batch_size: 4096          # Total batch size for training
+    minibatch_size: 64              # Size of minibatches for SGD
+    lr: 0.0003                      # Learning rate (3e-4)
+    gamma: 0.99                     # Discount factor
+    lambda_: 0.95                   # GAE lambda parameter
+    clip_param: 0.2                 # PPO clipping parameter
+    entropy_coeff: 0.01             # Entropy regularization coefficient
+    vf_loss_coeff: 0.5              # Value function loss coefficient
+    num_epochs: 10                  # Number of SGD epochs per training iteration
+
+  # Multi-agent configuration
+  multi_agent:
+    policies:
+      - "plunger_policy"
+      - "barrier_policy"
+    policies_to_train:
+      - "plunger_policy" 
+      - "barrier_policy"
+    count_steps_by: "agent_steps"
+
+# Resource allocation
+resources:
+  num_gpus: 8                       # Total GPUs for the algorithm
+
+# Checkpoint configuration
+checkpoints:
+  save_dir: "./checkpoints"         # Directory to save checkpoints
+  upload_best_only: true           # Only upload checkpoints with improved performance
