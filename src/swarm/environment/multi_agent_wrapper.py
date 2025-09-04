@@ -13,20 +13,12 @@ import numpy as np
 from gymnasium import spaces
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
-# Import QuantumDeviceEnv - multiple approaches for compatibility
-try:
-    # Try relative import first (when used as package)
-    from .env import QuantumDeviceEnv
-except ImportError:
-    try:
-        # Try direct import (when Environment is in sys.path)
-        from env import QuantumDeviceEnv
-    except ImportError:
-        # Fallback: add current directory to path and import
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        from env import QuantumDeviceEnv
+# Add src directory to path for clean imports
+from pathlib import Path
+src_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(src_dir))
+
+from swarm.environment.env import QuantumDeviceEnv
 
 
 class MultiAgentQuantumWrapper(MultiAgentEnv):

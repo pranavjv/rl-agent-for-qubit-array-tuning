@@ -7,6 +7,7 @@ from single-channel capacitance images with uncertainty estimation.
 """
 
 import argparse
+import sys
 import time
 from pathlib import Path
 from typing import Dict, Tuple
@@ -18,9 +19,13 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 
-# Local imports
-from CapacitancePrediction import create_loss_function, create_model
-from dataloader import create_data_loaders, get_transforms
+# Add src directory to path for clean imports
+from pathlib import Path
+src_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(src_dir))
+
+from swarm.capacitance_model.CapacitancePrediction import create_loss_function, create_model
+from swarm.capacitance_model.dataloader import create_data_loaders, get_transforms
 from scipy import stats
 from torch.utils.data import DataLoader
 from tqdm import tqdm

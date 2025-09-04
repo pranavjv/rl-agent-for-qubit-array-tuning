@@ -7,28 +7,13 @@ import torch
 import yaml
 from gymnasium import spaces
 
-# Import qarray_base_class - multiple approaches for Ray compatibility
-try:
-    # Try relative import first (when used as package)
-    from .qarray_base_class import QarrayBaseClass
-except ImportError:
-    try:
-        # Try direct import (when Environment is in sys.path)
-        from qarray_base_class import QarrayBaseClass
-    except ImportError:
-        # Fallback: add current directory to path and import
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        from qarray_base_class import QarrayBaseClass
-try:
-    from fake_capacitance_model import fake_capacitance_model
-except ImportError:
-    # Fallback: add current directory to path and import
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_dir not in sys.path:
-        sys.path.insert(0, current_dir)
-    from fake_capacitance_model import fake_capacitance_model
+# Add src directory to path for clean imports
+from pathlib import Path
+src_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(src_dir))
+
+from swarm.environment.qarray_base_class import QarrayBaseClass
+from swarm.environment.fake_capacitance_model import fake_capacitance_model
 
 
 # Set matplotlib backend before importing pyplot to avoid GUI issues
@@ -36,31 +21,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-# Import capacitance model components
-try:
-    from ..capacitance_model import CapacitancePredictionModel, CapacitancePredictor
-except ImportError:
-    # Fallback for direct execution - try absolute imports with path adjustment
-    try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)  # swarm package directory
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from capacitance_model.BayesianUpdater import CapacitancePredictor
-        from capacitance_model.CapacitancePrediction import CapacitancePredictionModel
-    except ImportError:
-        # Final fallback - individual module imports with path adjustment
-        try:
-            capacitance_dir = os.path.join(parent_dir, "capacitance_model")
-            if capacitance_dir not in sys.path:
-                sys.path.insert(0, capacitance_dir)
-            from BayesianUpdater import CapacitancePredictor
-            from CapacitancePrediction import CapacitancePredictionModel
-        except ImportError:
-            # Disable capacitance model if all imports fail
-            CapacitancePredictionModel = None
-            CapacitancePredictor = None
-            print("Warning: Could not import capacitance model components")
+from swarm.capacitance_model import CapacitancePredictionModel, CapacitancePredictor
 
 
 class QuantumDeviceEnv(gym.Env):

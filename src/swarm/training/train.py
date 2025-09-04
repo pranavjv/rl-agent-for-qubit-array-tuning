@@ -27,20 +27,20 @@ logging.getLogger("ray").setLevel(logging.WARNING)
 logging.getLogger("ray.tune").setLevel(logging.WARNING)
 logging.getLogger("ray.rllib").setLevel(logging.WARNING)
 
-# Add current directory to path for imports
+# Add src directory to path for clean imports
 current_dir = Path(__file__).parent
-swarm_package_dir = current_dir.parent  # Get swarm package directory (/path/to/swarm)
-swarm_src_dir = swarm_package_dir.parent  # Get src directory (/path/to/src)
-swarm_root_dir = swarm_src_dir.parent  # Get Swarm root directory
-sys.path.append(str(swarm_src_dir))
+swarm_package_dir = current_dir.parent  # swarm package directory
+src_dir = swarm_package_dir.parent  # src directory
+project_root = src_dir.parent  # project root directory
+sys.path.insert(0, str(src_dir))
 
-from swarm.training.utils.metrics_logger import (  # noqa: E402
+from swarm.training.utils import (  # noqa: E402
     log_to_wandb,
     print_training_progress,
     setup_wandb_metrics,
     upload_checkpoint_artifact,
+    policy_mapping_fn,
 )
-from swarm.training.utils.policy_mapping import policy_mapping_fn  # noqa: E402
 
 
 def create_env(config=None):
@@ -80,11 +80,11 @@ def main():
         "log_to_driver": config['ray']['log_to_driver'],
         "logging_level": config['ray']['logging_level'],
         "runtime_env": {
-            "working_dir": str(swarm_src_dir),
+            "working_dir": str(src_dir),
             "excludes": config['ray']['runtime_env']['excludes'],
             "env_vars": {
                 **config['ray']['runtime_env']['env_vars'],
-                "SWARM_PROJECT_ROOT": str(swarm_root_dir),
+                "SWARM_PROJECT_ROOT": str(project_root),
             },
         },
     }

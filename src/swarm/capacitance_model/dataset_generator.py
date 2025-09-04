@@ -22,14 +22,11 @@ from typing import Any, Dict
 
 import numpy as np
 
-# Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "Environment"))
+# Add src directory to path for clean imports
+src_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(src_dir))
 
-try:
-    from qarray_base_class import QarrayBaseClass
-except ImportError:
-    print("Error: Could not import QarrayBaseClass. Please check the path.")
-    sys.exit(1)
+from swarm.environment.qarray_base_class import QarrayBaseClass
 
 
 @dataclass
