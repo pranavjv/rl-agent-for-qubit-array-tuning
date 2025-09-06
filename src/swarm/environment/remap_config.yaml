@@ -1,3 +1,7 @@
+model_config:
+  reference_mode: "zeros" # can be "zeros" or "optimal"
+
+  debug: false
 
 capacitance_params:
   cdd_increase_per_map: 0.1

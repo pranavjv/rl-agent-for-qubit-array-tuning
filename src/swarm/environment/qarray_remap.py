@@ -15,7 +15,6 @@ class QarrayRemapper:
         obs_voltage_max,
         obs_image_size=128,
         config_path="./remap_config.yaml",
-        debug=False,
         **kwargs
     ):
 
@@ -23,21 +22,27 @@ class QarrayRemapper:
         self.has_barriers = has_barriers
         self.num_dots = num_dots
 
-        self.voltage_bounds = np.zeros((self.num_dots)) # placeholder for now, may depend on the base model params
-        self.ground_truth_coords = self.model.optimal_Vg(optimal_VG_center)[:-1] # ignore sensor voltage
+        self.config = self._load_config(config_path)
 
-        self.window_sizes = self.ground_truth_coords - self.voltage_bounds
+        reference_mode = self.config["model_config"]["reference_mode"]
+        if reference_mode == "zeros":
+            self.reference_coords = np.zeros(self.num_dots)
+        elif reference_mode == "optimal":
+            self.reference_coords = self.model.optimal_Vg(optimal_VG_center)[:-1] # ignore sensor voltage
+
+        self.voltage_bounds = self.reference_coords - 10. # placeholder for now, may depend on the base model params
+
+        self.window_sizes = self.reference_coords - self.voltage_bounds
 
         self.obs_voltage_min = obs_voltage_min
         self.obs_voltage_max = obs_voltage_max
         self.obs_image_size = obs_image_size
 
-        self.debug = debug
-
-        self.config = self._load_config(config_path)
-
 
     def get_remapped_scan(self, gate1, gate2, gate_voltage1, gate_voltage2, barrier_voltage=None):
+        """
+        Gets a single scan, and returns its corresponding remapped ((gate1, gate2), barrier) voltages
+        """
         if barrier_voltage is None:
             assert not self.has_barriers, "Cannot provide barrier voltage, environment is not configured for barriers"
             return self._get_data_no_barrier(gate1, gate2, gate_voltage1, gate_voltage2)
@@ -47,7 +52,7 @@ class QarrayRemapper:
 
     
     def _get_data_no_barrier(self, gate1, gate2, gate_voltage1, gate_voltage2):
-        if gate_voltage1 < self.voltage_bounds[gate1-1] and gate_voltage2 < self.voltage_bounds[gate2-1]:
+        if gate_voltage1 > self.voltage_bounds[gate1-1] and gate_voltage2 > self.voltage_bounds[gate2-1]:
             # nothing to remap
             z = self._get_charge_sensor_data(self.model, gate_voltage1, gate_voltage2, gate1, gate2)
             return z, (gate_voltage1, gate_voltage2), 0.
@@ -56,20 +61,41 @@ class QarrayRemapper:
         delta1 = self.voltage_bounds[gate1-1] - gate_voltage1
         delta2 = self.voltage_bounds[gate2-1] - gate_voltage2
 
-        map_number1 = delta1 // self.window_sizes[gate1-1] if delta1 > 0 else 0
-        map_number2 = delta2 // self.window_sizes[gate2-1] if delta2 > 0 else 0
+        if self.config["model_config"]["debug"]:
+            print('delta1, delta2: ', delta1, delta2)
 
-        residual1 = delta1 % self.window_sizes[gate1-1] if delta1 > 0 else gate_voltage1
-        residual2 = delta2 % self.window_sizes[gate2-1] if delta2 > 0 else gate_voltage2
+        map_number1 = delta1 // self.window_sizes[gate1-1] + 1
+        map_number2 = delta2 // self.window_sizes[gate2-1] + 1
+
+        if self.config["model_config"]["debug"]:
+            print('map_number1, map_number2: ', map_number1, map_number2)
+
+        residual1 = delta1 % self.window_sizes[gate1-1]
+        residual2 = delta2 % self.window_sizes[gate2-1]
+
+        if self.config["model_config"]["debug"]:
+            print('residual1, residual2: ', residual1, residual2)
+
+        new_gate_voltage1 = self.reference_coords[gate1-1] - residual1
+        new_gate_voltage2 = self.reference_coords[gate2-1] - residual2
+
+        if self.config["model_config"]["debug"]:
+            print('new_gate_voltage1, new_gate_voltage2: ', new_gate_voltage1, new_gate_voltage2)
 
         model = self._get_local_qarray(map_number1, map_number2)
 
-        z = self._get_charge_sensor_data(model, residual1, residual2, gate1, gate2)
+        z = self._get_charge_sensor_data(model, new_gate_voltage1, new_gate_voltage2, gate1, gate2)
 
-        return z, (residual1, residual2), 0.
+        return z, (new_gate_voltage1, new_gate_voltage2), 0.
 
 
     def _get_local_qarray(self, map_number1, map_number2):
+        """
+        Creates a local model based on the distance from the ground truth
+        adds conductance and diagonal transition lines
+
+        TODO placeholder for now can be improved
+        """
         base_Cdd = self.model.Cdd
         base_Cgd = self.model.Cgd
         # can schedule other matrices as well
@@ -120,5 +146,20 @@ class QarrayRemapper:
 
         with open(config_path) as f:
             config = yaml.safe_load(f)
+        try:
+            self._validate_config(config)
+        except Exception as e:
+            raise ValueError(f"Invalid config: {e}")
         return config
+
+
+    def _validate_config(self, config):
+        debug = config["model_config"]["debug"]
+        assert isinstance(debug, bool)
+
+        reference_mode = config["model_config"]["reference_mode"]
+        assert reference_mode in ["zeros", "optimal"]
+
+        # etc.
+
 
