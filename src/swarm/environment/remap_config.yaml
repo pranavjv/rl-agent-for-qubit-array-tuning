@@ -1,0 +1,10 @@
+
+capacitance_params:
+  cdd_increase_per_map: 0.1
+  cgd_increase_per_map: 0.1
+  cbd_increase_per_map: 0.05
+  cbg_increase_per_map: 0.05
+
+noise_params:
+  # add noise increase here
+
