@@ -32,7 +32,9 @@ def initialize_experiment(n_dots=8):
     experiment = QarrayBaseClass(num_dots=num_dots)
     return True
 
-def create_plot(images_normal, images_remap, obs_voltage_min, obs_voltage_max):
+def create_plot(images_normal, images_remap, obs_voltage_min, obs_voltage_max, 
+                normal_gate_voltages, normal_barrier_voltages, 
+                remap_gate_voltages, remap_barrier_voltages):
     """Create matplotlib plots comparing normal and remapped observations."""
     num_channels = images_normal.shape[2]
     
@@ -55,7 +57,13 @@ def create_plot(images_normal, images_remap, obs_voltage_min, obs_voltage_max):
         
         axes[0, i].set_xlabel('ΔVoltage (V)')
         axes[0, i].set_ylabel('ΔVoltage (V)')
-        axes[0, i].set_title(f'Normal - Channel {i+1} (Gates {i+1}-{i+2})')
+        
+        # Create title with voltage values
+        gate1_v = normal_gate_voltages[i]
+        gate2_v = normal_gate_voltages[i+1]
+        barrier_v = normal_barrier_voltages[i]
+        title = f'Normal - Channel {i+1} (Gates {i+1}-{i+2})\nH: {gate1_v:.3f}V, V: {gate2_v:.3f}V, B: {barrier_v:.3f}V'
+        axes[0, i].set_title(title)
         
         # Add colorbar
         plt.colorbar(im, ax=axes[0, i], shrink=0.8)
@@ -72,7 +80,13 @@ def create_plot(images_normal, images_remap, obs_voltage_min, obs_voltage_max):
         
         axes[1, i].set_xlabel('ΔVoltage (V)')
         axes[1, i].set_ylabel('ΔVoltage (V)')
-        axes[1, i].set_title(f'Remapped - Channel {i+1} (Gates {i+1}-{i+2})')
+        
+        # Create title with remapped voltage values
+        gate1_v = remap_gate_voltages[i]
+        gate2_v = remap_gate_voltages[i+1]
+        barrier_v = remap_barrier_voltages[i]
+        title = f'Remapped - Channel {i+1} (Gates {i+1}-{i+2})\nH: {gate1_v:.3f}V, V: {gate2_v:.3f}V, B: {barrier_v:.3f}V'
+        axes[1, i].set_title(title)
         
         # Add colorbar
         plt.colorbar(im, ax=axes[1, i], shrink=0.8)
@@ -176,8 +190,19 @@ def simulate():
         images_normal = obs_normal["image"]
         images_remap = obs_remap["image"]
         
-        # Create comparison plot
-        plot_base64 = create_plot(images_normal, images_remap, experiment.obs_voltage_min, experiment.obs_voltage_max)
+        # Extract voltage information from observations
+        normal_gate_voltages = obs_normal["obs_gate_voltages"]
+        normal_barrier_voltages = obs_normal["obs_barrier_voltages"]
+        remap_gate_voltages = obs_remap["obs_gate_voltages"]
+        remap_barrier_voltages = obs_remap["obs_barrier_voltages"]
+        
+        # Create comparison plot with voltage information
+        plot_base64 = create_plot(
+            images_normal, images_remap, 
+            experiment.obs_voltage_min, experiment.obs_voltage_max,
+            normal_gate_voltages, normal_barrier_voltages,
+            remap_gate_voltages, remap_barrier_voltages
+        )
         
         return jsonify({
             'success': True,
