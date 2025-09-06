@@ -9,7 +9,7 @@ import matplotlib
 import numpy as np
 import yaml
 from qarray import ChargeSensedDotArray, LatchingModel, TelegraphNoise, WhiteNoise
-from qarray_patched import QarrayPatched
+from qarray_remap import QarrayRemapper
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -29,8 +29,8 @@ class QarrayBaseClass:
         self,
         num_dots,
         config_path="qarray_config.yaml",
-        obs_voltage_min=-0.5,
-        obs_voltage_max=0.5,
+        obs_voltage_min=-1.0,
+        obs_voltage_max=1.0,
         obs_image_size=128,
         remap=False,
         debug=False,
@@ -65,9 +65,8 @@ class QarrayBaseClass:
 
         # --- Initialise remapping parameters ---
         self.remap = remap
-        if remap:
-            self.qarray_patched = QarrayPatched(model=self.model, num_dots=num_dots, has_barriers=False, optimal_VG_center=self.optimal_VG_center,
-                                                obs_voltage_min=obs_voltage_min, obs_voltage_max=obs_voltage_max)
+        self.qarray_patched = QarrayRemapper(model=self.model, num_dots=num_dots, has_barriers=False, optimal_VG_center=self.optimal_VG_center,
+                                            obs_voltage_min=obs_voltage_min, obs_voltage_max=obs_voltage_max)
 
 
     def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2):
@@ -94,7 +93,7 @@ class QarrayBaseClass:
         return z
 
 
-    def _get_obs(self, gate_voltages, barrier_voltages):
+    def _get_obs(self, gate_voltages, barrier_voltages, force_remap=False):
         """
         Helper method to get the current observation of the environment.
 
@@ -109,7 +108,7 @@ class QarrayBaseClass:
             len(barrier_voltages) == self.num_dots - 1
         ), f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
 
-        if self.remap:
+        if self.remap or force_remap:
             return self._get_obs_remap(gate_voltages, barrier_voltages)
 
 
@@ -145,6 +144,7 @@ class QarrayBaseClass:
     def _get_obs_remap(self, gate_voltages, barrier_voltages):
         allgates = list(range(1, self.num_dots + 1))  # Gate numbers for qarray (1-indexed)
         all_z = []
+
         new_gate_voltages = []
         new_barrier_voltages = []
 
@@ -152,10 +152,13 @@ class QarrayBaseClass:
             voltage1 = gate_voltages[i]  # Use 0-based indexing for gate_voltages array
             voltage2 = gate_voltages[i + 1]  # Use 0-based indexing for gate_voltages array
             # z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2)
-            z, gate_v, barrier_v = self.qarray_patched.get_remapped_scan(gate1, gate2, voltage1, voltage2)
+            z, gate_vs, barrier_v = self.qarray_patched.get_remapped_scan(gate1, gate2, voltage1, voltage2)
             # each call returns only the first mapped voltage (since each gets computed twice)
             all_z.append(z[:, :, 0])
-            new_gate_voltages.append(gate_v)
+            if i == len(allgates) - 2: # last iteration
+                new_gate_voltages.extend(gate_vs)
+            else:
+                new_gate_voltages.append(gate_vs[0])
             new_barrier_voltages.append(barrier_v)
 
 
@@ -172,11 +175,14 @@ class QarrayBaseClass:
             raise ValueError(
                 f"Image observation shape {all_images.shape} does not match expected {expected_image_shape}"
             )
+        
+        assert len(new_gate_voltages) == self.num_dots, f"Incorrect gate voltage shape, expected {self.num_dots}, got {len(new_gate_voltages)}"
+        assert len(new_barrier_voltages) == self.num_dots - 1, f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(new_barrier_voltages)}"
 
         return {
             "image": all_images,
-            "obs_gate_voltages": np.array(gate_voltages, dtype=np.float32),
-            "obs_barrier_voltages": np.array(barrier_voltages, dtype=np.float32),
+            "obs_gate_voltages": np.array(new_gate_voltages, dtype=np.float32),
+            "obs_barrier_voltages": np.array(new_barrier_voltages, dtype=np.float32),
         }
 
 
@@ -475,7 +481,7 @@ class QarrayBaseClass:
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=8)
+    experiment = QarrayBaseClass(num_dots=8, remap=True)
     import time
 
     start = time.time()
@@ -484,7 +490,7 @@ if __name__ == "__main__":
     # os.environ['JAX_PLATFORMS'] = 'cpu'  # Alternative JAX CPU-only setting
     os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 
-    image = experiment._get_obs([0] * 8, [0] * 7)["image"][:, :, 1]
+    image = experiment._get_obs([-5.] * 8, [0] * 7)["image"][:, :, 1]
     print(time.time() - start)
 
     start = time.time()

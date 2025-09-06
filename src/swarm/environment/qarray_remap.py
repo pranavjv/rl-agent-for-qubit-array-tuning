@@ -1,9 +1,9 @@
 import numpy as np
 import yaml
 import os
+import copy
 
-
-class QarrayPatched:
+class QarrayRemapper:
 
     def __init__(
         self,
@@ -21,9 +21,10 @@ class QarrayPatched:
 
         self.model = model # inherited from qarray base class, do not modify
         self.has_barriers = has_barriers
+        self.num_dots = num_dots
 
-        self.voltage_bounds = np.zeros((self.num_dots)) # placeholder for now
-        self.ground_truth_coords = self.model.optimal_vg(optimal_VG_center)
+        self.voltage_bounds = np.zeros((self.num_dots)) # placeholder for now, may depend on the base model params
+        self.ground_truth_coords = self.model.optimal_Vg(optimal_VG_center)[:-1] # ignore sensor voltage
 
         self.window_sizes = self.ground_truth_coords - self.voltage_bounds
 
@@ -48,7 +49,8 @@ class QarrayPatched:
     def _get_data_no_barrier(self, gate1, gate2, gate_voltage1, gate_voltage2):
         if gate_voltage1 < self.voltage_bounds[gate1-1] and gate_voltage2 < self.voltage_bounds[gate2-1]:
             # nothing to remap
-            return self._get_charge_sensor_data(self.model, gate_voltage1, gate_voltage2, gate1, gate2)
+            z = self._get_charge_sensor_data(self.model, gate_voltage1, gate_voltage2, gate1, gate2)
+            return z, (gate_voltage1, gate_voltage2), 0.
 
 
         delta1 = self.voltage_bounds[gate1-1] - gate_voltage1
@@ -64,17 +66,20 @@ class QarrayPatched:
 
         z = self._get_charge_sensor_data(model, residual1, residual2, gate1, gate2)
 
-        return z, residual1, 0.0
+        return z, (residual1, residual2), 0.
 
 
     def _get_local_qarray(self, map_number1, map_number2):
         base_Cdd = self.model.Cdd
         base_Cgd = self.model.Cgd
         # can schedule other matrices as well
+        if self.has_barriers:
+            base_Cbd = self.model.base_Cbd
+            base_Cbg = self.model.base_Cbg
 
         # increase noise, etc.
 
-        local_model = self.model.copy()
+        local_model = copy.deepcopy(self.model)
 
         radial_map_number = np.sqrt(map_number1**2 + map_number2**2)
 
@@ -83,6 +88,13 @@ class QarrayPatched:
 
         local_model.Cdd = Cdd
         local_model.Cgd = Cgd
+
+        if self.has_barriers:
+            Cbd = base_Cbd * (1 + radial_map_number * self.config["capacitance_params"]["cbd_increase_per_map"])
+            Cbg = base_Cbg * (1 + radial_map_number * self.config["capacitance_params"]["cbg_increase_per_map"])
+
+            local_model.Cbd = Cbd
+            local_model.Cbg = Cbg
 
         return local_model
 
