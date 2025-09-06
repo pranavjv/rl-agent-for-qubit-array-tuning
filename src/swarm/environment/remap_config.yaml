@@ -1,0 +1,9 @@
+
+capacitance_params:
+  cdd_increase_per_map: 0.1
+  cgd_increase_per_map: 0.1
+  # add other capacitances here
+
+noise_params:
+  # add noise increase here
+
