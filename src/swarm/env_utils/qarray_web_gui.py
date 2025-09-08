@@ -14,10 +14,9 @@ import base64
 import sys
 import os
 
-# Add the environment directory to the path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'environment'))
-
-from qarray_base_class import QarrayBaseClass
+# Add the src/swarm directory to the path for absolute imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from environment.qarray_base_class import QarrayBaseClass
 
 app = Flask(__name__)
 
