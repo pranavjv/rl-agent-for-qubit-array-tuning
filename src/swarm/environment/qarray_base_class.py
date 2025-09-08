@@ -9,7 +9,7 @@ import matplotlib
 import numpy as np
 import yaml
 from qarray import ChargeSensedDotArray, LatchingModel, TelegraphNoise, WhiteNoise
-from qarray_remap import QarrayRemapper
+from .qarray_remap import QarrayRemapper
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
