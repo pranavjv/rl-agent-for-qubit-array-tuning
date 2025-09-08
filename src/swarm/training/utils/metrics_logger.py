@@ -164,7 +164,14 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
     metrics = extract_training_metrics(result)
 
     # Prepare logging dictionary
-    log_dict = {}
+    log_dict = {
+        "iteration": iteration + 1,  # Log iteration for step metric
+        "total_time": metrics["total_time"],
+        "iter_time": metrics["iter_time"],
+        "env_steps": metrics["env_steps"],
+        "memory_percent": metrics["memory_percent"],
+        "cpu_percent": metrics["cpu_percent"],
+    }
 
     # Episode returns
     if metrics["episode_return_mean"] is not None:
@@ -207,8 +214,8 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
             }
         )
 
-    # Log to wandb
-    wandb.log(log_dict, step=iteration + 1)
+    # Log to wandb (don't specify step since we're logging iteration explicitly)
+    wandb.log(log_dict)
 
     # Update summary metrics for best performance tracking
     if metrics["episode_return_mean"] is not None:

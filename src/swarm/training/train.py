@@ -149,7 +149,15 @@ def main():
         env_instance.close()
         del env_instance
 
+        # Save training config to checkpoint directory for easy reference
+        checkpoint_base_dir = Path(config['checkpoints']['save_dir'])
+        checkpoint_base_dir.mkdir(parents=True, exist_ok=True)
+        config_save_path = checkpoint_base_dir / "training_config.yaml"
+        with open(config_save_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
         print(f"\nStarting training for {config['defaults']['num_iterations']} iterations...\n")
+        print(f"Training config saved to: {config_save_path}\n")
 
         training_start_time = time.time()
         best_reward = float("-inf")  # Track best performance for artifact upload
