@@ -3,21 +3,23 @@ from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import (
 )
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec, RLModuleSpec
 
-from swarm.voltage_model.custom_image_catalog import CustomImageCatalog
+from swarm.voltage_model.quantum_catalog import QuantumDeviceCatalog
 
 
-def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
+def create_rl_module_spec(env_instance, config_file=None) -> MultiRLModuleSpec:
     """
     Create policy specifications for RLlib with the plunger and barrier policies
     (note there are only TWO policies although each has multiple agent instances)
 
     Args:
         env_instance: Instance of the quantum device environment
+        config_file: Optional path to YAML configuration file for neural networks
 
     Returns:
         MultiRLModuleSpec object
     """
     import numpy as np
+    import yaml
     from gymnasium import spaces
 
     # Get full environment spaces from base environment
@@ -92,24 +94,29 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
         dtype=np.float32,
     )
 
-    # Create model config for custom RLModule
-
-    model_config = {
-        "max_seq_len": 50,
-        "batch_mode": "complete_episodes",
-        "use_lstm": False,
-        "lstm_cell_size": 128,
-        "lstm_use_prev_action": True,
-        "lstm_use_prev_reward": False,
-    }
+    # Load neural network configuration from YAML file
+    if config_file is not None:
+        try:
+            with open(config_file, 'r') as f:
+                config_data = yaml.safe_load(f)
+            neural_networks_config = config_data.get('neural_networks', {})
+        except (FileNotFoundError, yaml.YAMLError):
+            print(f"Warning: Could not load config file {config_file}, using defaults")
+            neural_networks_config = {}
+    else:
+        neural_networks_config = {}
+    
+    # Create model configs for each policy
+    plunger_config = neural_networks_config.get('plunger_policy', {})
+    barrier_config = neural_networks_config.get('barrier_policy', {})
 
     # Create single agent RLModule specs using new API
     plunger_spec = RLModuleSpec(
         module_class=DefaultPPOTorchRLModule,
         observation_space=gate_obs_space,
         action_space=gate_action_space,
-        model_config=model_config,
-        catalog_class=CustomImageCatalog,
+        model_config=plunger_config,
+        catalog_class=QuantumDeviceCatalog,
         inference_only=False,
     )
 
@@ -117,8 +124,8 @@ def create_rl_module_spec(env_instance) -> MultiRLModuleSpec:
         module_class=DefaultPPOTorchRLModule,
         observation_space=barrier_obs_space,
         action_space=barrier_action_space,
-        model_config=model_config,
-        catalog_class=CustomImageCatalog,
+        model_config=barrier_config,
+        catalog_class=QuantumDeviceCatalog,
         inference_only=False,
     )
 
