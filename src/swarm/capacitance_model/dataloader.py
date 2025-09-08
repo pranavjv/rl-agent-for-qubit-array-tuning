@@ -18,7 +18,7 @@ def get_channel_targets(channel_idx: int, cgd_matrix: np.ndarray, num_dots: int)
     - etc.
     
     Args:
-        channel_idx: Channel index (0-indexed)
+        channel_idx: Index of the leftmost dot in the pair being swept (0-indexed)
         cgd_matrix: CGD matrix of shape (num_dots, num_dots+1)
         num_dots: Number of dots in the system
         
@@ -324,8 +324,13 @@ class PercentileNormalize:
             torch.Tensor: Normalized tensor with values in [0, 1]
         """
         # Convert to numpy for percentile calculation
-        data = tensor.numpy()
-        
+        if isinstance(tensor, torch.Tensor):
+            data = tensor.numpy()
+        elif isinstance(tensor, np.ndarray):
+            data = tensor
+        else:
+            raise TypeError("Input must be a torch.Tensor or np.ndarray")
+
         # Calculate percentiles for the middle 99% of data
         p_low = np.percentile(data, 0.5)   # 0.5th percentile  
         p_high = np.percentile(data, 99.5) # 99.5th percentile
@@ -365,7 +370,7 @@ if __name__ == "__main__":
     import random
     
     # Test the dataset
-    data_dir = "/home/edn/rl-agent-for-qubit-array-tuning/Swarm/CapacitanceModel/dataset"
+    data_dir = "/home/edn/rl-agent-for-qubit-array-tuning/src/swarm/capacitance_model/dataset"
     
     print("Testing dataset loading...")
     dataset = CapacitanceDataset(data_dir, load_to_memory=False)

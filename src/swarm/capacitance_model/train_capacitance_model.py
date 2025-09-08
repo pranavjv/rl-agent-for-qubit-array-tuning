@@ -360,7 +360,32 @@ def train_epoch(model: nn.Module,
     for batch_idx, (images, targets) in enumerate(pbar):
         images = images.to(device)
         targets = targets.to(device)
-        
+    
+
+        ###
+        # load_dict = True
+        # if load_dict:
+        #     chkpt = torch.load('./weights/best_model.pth', map_location=torch.device("cuda:0"))
+        #     model.load_state_dict(chkpt['model_state_dict'])
+        #     print('Loaded state dict successfully')
+        # with torch.no_grad():
+        #     predictions = model(images)
+        #     total_loss_batch, mse_loss, nll_loss, log_vars, errors = loss_fn(predictions, targets)
+        #     means, logvars = predictions
+        #     means = means.cpu().numpy()
+        # print('PREDICTIONS: ', means[:8,:])
+        # print('TARGETS: ', targets.cpu().numpy()[:8,:])
+        # print('MSE LOSS: ', mse_loss.item())
+        # print('MAE: ', torch.sqrt(errors).mean().item())
+
+        # import sys
+        # print('--- Train capacitance model debug, auto-exiting')
+        # import traceback
+        # traceback.print_stack()
+        # sys.exit(0)
+        ###
+
+
         # Forward pass
         optimizer.zero_grad()
         predictions = model(images)
@@ -638,12 +663,12 @@ def train_func(config: dict):
 def main():
     parser = argparse.ArgumentParser(description='Train Capacitance Prediction Model')
     parser.add_argument('--root_data_dir', type=str, 
-                       default='/home/edn/rl-agent-for-qubit-array-tuning/Swarm/CapacitanceModel/',
+                       default='/home/edn/rl-agent-for-qubit-array-tuning/src/swarm/capacitance_model/',
                        help='Path to dataset directory')
     parser.add_argument('--data_dirs', type=str, nargs='+', default=['dataset', '4dot_dataset'],
                        help='List of data directories')
-    parser.add_argument('--output_dir', type=str, default='./outputs',
-                       help='Directory to save outputs')
+    parser.add_argument('--output_dir', type=str, default='./weights',
+                       help='Directory to save model weights')
     parser.add_argument('--batch_size', type=int, default=64,
                        help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=5,
@@ -655,7 +680,7 @@ def main():
     parser.add_argument('--num_workers', type=int, default=4,
                        help='Number of data loading workers')
     parser.add_argument('--load_to_memory', action='store_true',
-                       help='Load all data to memory (requires ~11GB RAM)')
+                       help='Load all data to memory (requires ~15GB RAM)')
     parser.add_argument('--mse_weight', type=float, default=100.0,
                        help='Weight for MSE loss component')
     parser.add_argument('--nll_weight', type=float, default=0.1,
@@ -672,6 +697,9 @@ def main():
                        help='Disable wandb logging')
     
     args = parser.parse_args()
+
+    if not args.load_to_memory:
+        print("Warning: load to memory not enabled. Training may be MUCH slower")
     
     gpu_list = []
     for gpu_arg in args.gpus:
@@ -851,6 +879,16 @@ def main():
                 )
         
         if not args.no_wandb:
+            # Upload best model to wandb artifacts
+            best_model_path = output_dir / 'best_model.pth'
+            if best_model_path.exists():
+                artifact = wandb.Artifact('capacitance_model', type='model')
+                artifact.add_file(str(best_model_path))
+                wandb.log_artifact(artifact)
+                print(f"Uploaded model to wandb artifacts: {best_model_path}")
+            else:
+                print("Warning: best_model.pth not found, skipping wandb artifact upload.")
+            
             wandb.finish()
 
 

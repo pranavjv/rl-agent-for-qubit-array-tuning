@@ -217,7 +217,10 @@ def run_test_mode(config: GenerationConfig) -> None:
             
             # Plot the charge stability diagram
             im = axes[idx].imshow(plot_image, cmap='viridis', aspect='equal')
-            axes[idx].set_title(f'Sample {idx+1}', fontsize=10)
+            cgd_matrix = sample['cgd_matrix']
+            #cgd_ground_truth = [cgd_matrix[0,2], cgd_matrix[1,2], cgd_matrix[1,3]]
+            #cgd_ground_truth = [np.round(v, 3).item() for v in cgd_ground_truth]
+            #axes[idx].set_title(f'Sample {idx+1}\nvalues={cgd_ground_truth}', fontsize=10)
             axes[idx].set_xlabel('Gate Voltage 1')
             axes[idx].set_ylabel('Gate Voltage 2')
             
@@ -403,7 +406,7 @@ def main():
                        help='Total number of samples to generate')
     parser.add_argument('--workers', type=int, default=8,
                        help='Number of worker processes')
-    parser.add_argument('--num_dots', type=int, default=4,
+    parser.add_argument('--num_dots', type=int, default=8,
                        help='Number of quantum dots')
     parser.add_argument('--batch_size', type=int, default=1000,
                        help='Number of samples per batch file')

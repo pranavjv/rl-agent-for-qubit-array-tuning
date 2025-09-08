@@ -15,6 +15,7 @@ from swarm.environment.qarray_base_class import QarrayBaseClass
 from swarm.capacitance_model.dataset_generator import generate_sample
 from swarm.capacitance_model.CapacitancePrediction import CapacitancePredictionModel
 from swarm.capacitance_model.BayesianUpdater import CapacitancePredictor
+from swarm.capacitance_model.dataloader import PercentileNormalize, get_channel_targets
 
 class TestCapacitancePredictionModel:
 
@@ -64,12 +65,13 @@ class TestCapacitancePredictionModel:
 
             cgd_matrix = qarray.model.Cgd.copy()
 
-            cgd_ground_truth = np.array([cgd_matrix[0,2], cgd_matrix[1,2], cgd_matrix[1,3]], dtype=np.float32)
+            cgd_targets = get_channel_targets(channel_idx=1, cgd_matrix=cgd_matrix, num_dots=n_dots)
+            # cgd_ground_truth = np.array([cgd_matrix[0,2], cgd_matrix[1,2], cgd_matrix[1,3]], dtype=np.float32)
 
             observation = {
                 'image': obs['image'].astype(np.float32)[:, :, 1:2],  # get middle two dots
                 'cgd_matrix': cgd_matrix.astype(np.float32),
-                'cgd_ground_truth': cgd_ground_truth,
+                'cgd_ground_truth': cgd_targets,
                 'ground_truth_voltages': gt_voltages.astype(np.float32),
                 'gate_voltages': gate_voltages.astype(np.float32),
                 'white_noise': params['white_noise_amplitude'],
@@ -117,6 +119,8 @@ class TestCapacitancePredictionModel:
         if not os.path.exists(weights_path):
             raise FileNotFoundError(f"Model weights not found at: {weights_path}")
 
+        assert n_dots == 4, "Currently only runs with 4 dots (Some hardcoded indices)"
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = device
 
@@ -152,6 +156,8 @@ class TestCapacitancePredictionModel:
 
         self.n_dots = n_dots
 
+        self.normalizer = PercentileNormalize()
+
     
     def _run_noise_test(self):
         data = self._load_data(n_dots=self.n_dots)
@@ -163,7 +169,8 @@ class TestCapacitancePredictionModel:
             print("\n")
             print("="*40)
             print(f"Observation {i+1}")
-            image = torch.from_numpy(obs['image']).unsqueeze(0).permute(0, 3, 1, 2).to(self.device)
+            image = self.normalizer(obs['image']) # apply same normalization as in training
+            image = image.unsqueeze(0).permute(0, 3, 1, 2).to(self.device)
             values, logvars = self.ml_model(image)
             values = values.detach().flatten().cpu().numpy()
             logvars = logvars.detach().flatten().cpu().numpy()
@@ -232,7 +239,7 @@ if __name__ == '__main__':
     np.set_printoptions(precision=10, suppress=True)
     os.environ["CUDA_VISIBLE_DEVICES"] = "7" # change as needed
     
-    weights_path = os.path.join(os.path.dirname(__file__), 'outputs', 'best_model.pth')
+    weights_path = os.path.join(os.path.dirname(__file__), 'weights', 'best_model.pth')
 
     test = TestCapacitancePredictionModel(n_dots=4, weights_path=weights_path, reverse=True)
     test.run_test(type="noise")
