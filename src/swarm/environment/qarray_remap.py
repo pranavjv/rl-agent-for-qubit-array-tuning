@@ -52,8 +52,15 @@ class QarrayRemapper:
 
     
     def _get_data_no_barrier(self, gate1, gate2, gate_voltage1, gate_voltage2):
-        if gate_voltage1 > self.voltage_bounds[gate1-1] and gate_voltage2 > self.voltage_bounds[gate2-1]:
-            # nothing to remap
+        # note gates are 1-indexed
+        
+        debug = self.config["model_config"]["debug"]
+
+        if (gate_voltage1 > self.voltage_bounds[gate1-1] and gate_voltage2 > self.voltage_bounds[gate2-1]):
+            # or (gate_voltage1 > self.reference_coords[gate1-1] or gate_voltage2 > self.reference_coords[gate2-1]):
+            # don't remap if either voltage is in the single line regime, or both are within
+            if debug:
+                print('No remap needed, calling original base model ...')
             z = self._get_charge_sensor_data(self.model, gate_voltage1, gate_voltage2, gate1, gate2)
             return z, (gate_voltage1, gate_voltage2), 0.
 
@@ -61,25 +68,25 @@ class QarrayRemapper:
         delta1 = self.voltage_bounds[gate1-1] - gate_voltage1
         delta2 = self.voltage_bounds[gate2-1] - gate_voltage2
 
-        if self.config["model_config"]["debug"]:
+        if debug:
             print('delta1, delta2: ', delta1, delta2)
 
-        map_number1 = delta1 // self.window_sizes[gate1-1] + 1
-        map_number2 = delta2 // self.window_sizes[gate2-1] + 1
+        map_number1 = delta1 // self.window_sizes[gate1-1] + 1 if delta1 > 0 else 0
+        map_number2 = delta2 // self.window_sizes[gate2-1] + 1 if delta2 > 0 else 0
 
-        if self.config["model_config"]["debug"]:
+        if debug:
             print('map_number1, map_number2: ', map_number1, map_number2)
 
         residual1 = delta1 % self.window_sizes[gate1-1]
         residual2 = delta2 % self.window_sizes[gate2-1]
 
-        if self.config["model_config"]["debug"]:
+        if debug:
             print('residual1, residual2: ', residual1, residual2)
 
-        new_gate_voltage1 = self.reference_coords[gate1-1] - residual1
-        new_gate_voltage2 = self.reference_coords[gate2-1] - residual2
+        new_gate_voltage1 = self.reference_coords[gate1-1] - residual1 if delta1 > 0 else gate_voltage1
+        new_gate_voltage2 = self.reference_coords[gate2-1] - residual2 if delta2 > 0 else gate_voltage2
 
-        if self.config["model_config"]["debug"]:
+        if debug:
             print('new_gate_voltage1, new_gate_voltage2: ', new_gate_voltage1, new_gate_voltage2)
 
         model = self._get_local_qarray(map_number1, map_number2)
@@ -93,15 +100,13 @@ class QarrayRemapper:
         """
         Creates a local model based on the distance from the ground truth
         adds conductance and diagonal transition lines
-
-        TODO placeholder for now can be improved
         """
-        base_Cdd = self.model.Cdd
-        base_Cgd = self.model.Cgd
+        base_Cdd = self.model.Cdd.copy()
+        base_Cgd = self.model.Cgd.copy()
         # can schedule other matrices as well
         if self.has_barriers:
-            base_Cbd = self.model.base_Cbd
-            base_Cbg = self.model.base_Cbg
+            base_Cbd = self.model.base_Cbd.copy()
+            base_Cbg = self.model.base_Cbg.copy()
 
         # increase noise, etc.
 
@@ -141,6 +146,10 @@ class QarrayRemapper:
 
 
     def _load_config(self, config_path):
+        if not os.path.isabs(config_path):
+            # If relative path, look in the same directory as this file
+            config_path = os.path.join(os.path.dirname(__file__), config_path)
+        
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found: {config_path}")
 

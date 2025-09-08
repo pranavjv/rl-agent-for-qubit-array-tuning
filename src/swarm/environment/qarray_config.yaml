@@ -69,7 +69,7 @@ simulator:
     coulomb_peak_width: {"min": 0.1, "max": 0.2}
 
     # Algorithm for charge stability diagram
-    algorithm: "default"
+    algorithm: "default" # default, brute_force or thresholded
     # Implementation for charge stability diagram
     implementation: "jax"
     # Maximum number of charge carriers

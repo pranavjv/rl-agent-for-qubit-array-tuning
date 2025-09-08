@@ -3,13 +3,16 @@ This file contains the QarrayBaseClass which is used to create a quantum dot arr
 """
 
 import os
+import sys
 
 # Set matplotlib backend before importing pyplot to avoid GUI issues
 import matplotlib
 import numpy as np
 import yaml
 from qarray import ChargeSensedDotArray, LatchingModel, TelegraphNoise, WhiteNoise
-from qarray_remap import QarrayRemapper
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from environment.qarray_remap import QarrayRemapper
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -109,6 +112,7 @@ class QarrayBaseClass:
         ), f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
 
         if self.remap or force_remap:
+            print("Warning: called get obs with remap set to True")
             return self._get_obs_remap(gate_voltages, barrier_voltages)
 
 
@@ -416,7 +420,7 @@ class QarrayBaseClass:
 
         self.model.gate_voltage_composer.virtual_gate_matrix = vgm
 
-    def _render_frame(self, image):
+    def _render_frame(self, image, path="quantum_dot_plot"):
         """
         Internal method to create the render image.
 
@@ -442,7 +446,7 @@ class QarrayBaseClass:
         plt.title("$|S_{11}|$ (Charge Stability Diagram)")
         plt.axis("equal")
 
-        plt.savefig("quantum_dot_plot.png")
+        plt.savefig(f"{path}.png")
         plt.show()
         plt.close()
 
@@ -481,7 +485,9 @@ class QarrayBaseClass:
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=8, remap=True)
+    num_dots = 2
+
+    experiment = QarrayBaseClass(num_dots=num_dots, remap=True)
     import time
 
     start = time.time()
@@ -490,12 +496,14 @@ if __name__ == "__main__":
     # os.environ['JAX_PLATFORMS'] = 'cpu'  # Alternative JAX CPU-only setting
     os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 
-    image = experiment._get_obs([-5.] * 8, [0] * 7)["image"][:, :, 1]
+    image = experiment._get_obs([0] * num_dots, [0] * (num_dots - 1))["image"][:, :, 0]
     print(time.time() - start)
 
     start = time.time()
 
-    image = experiment._get_obs([0] * 8, [0] * 7)["image"][:, :, 1]
+    voltage = - 2.0
+
+    image = experiment._get_obs([voltage] * num_dots, [0] * (num_dots - 1))["image"][:, :, 0]
     print(time.time() - start)
 
-    experiment._render_frame(image)
+    experiment._render_frame(image)#, path=f"quantum_dot_plot_{str(voltage)}")
