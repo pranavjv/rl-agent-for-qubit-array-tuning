@@ -7,7 +7,7 @@ from functools import partial
 from sklearn.gaussian_process.kernels import RBF
 from sklearn.gaussian_process import GaussianProcessRegressor
 
-from dataloader import get_channel_targets
+from capacitance_utils import get_channel_targets
 get_channel_targets = partial(get_channel_targets, has_sensor=False)
 
 
@@ -33,7 +33,7 @@ class InterpolatedCapacitancePredictor:
         means (np.ndarray): list of (coordinates, NxN matrix) pairs of posterior means
         variances (np.ndarray): list of (coordinates, NxN matrix) pairs of posterior errors
         prior_config (Dict or Callable): Configuration for prior distributions
-        history:
+        history: Dict mapping scan index to a list of (coordinates, means, variances) previous points
     """
 
     def __init__(
@@ -42,8 +42,10 @@ class InterpolatedCapacitancePredictor:
         prior_config: Union[Dict[Tuple[int, int], Tuple[float, float]], Callable],
         length_scale: float = 0.5, # has dimensions of voltage
         noise_level: float = 1e-4,
+        max_points_to_consider: int = 20,
     ):
         self.n_dots = n_dots
+        self.max_points_to_consider = max_points_to_consider
         self.prior_config = prior_config
 
         
@@ -61,7 +63,7 @@ class InterpolatedCapacitancePredictor:
         # note - dot pairs are 0-indexed
         dots = list(range(n_dots))
         
-        self.history = {k: [] for k in dots[:-1]} # we use the leftmost dot of the scan for indexing
+        self.history = {k: [] for k in dots[:-1]} # we use the leftmost dot as the scan index (same convention as get_channel_targets)
         # each entry in history will be a tuple of (coordinates, means, variances) for that dot pair
 
         # initialise the RBF kernel
@@ -229,7 +231,7 @@ class InterpolatedCapacitancePredictor:
         scan_idx = i
         assert scan_idx in self.history, f"Invalid scan index {scan_idx}"
 
-        prior_means, prior_vars = self._compute_kriging_prior(scan_idx, voltages)
+        prior_means, prior_vars = self._compute_kriging_prior(scan_idx, voltages, max_points=self.max_points_to_consider)
 
         predicted_means, predicted_logvars = zip(*ml_outputs)
         predicted_vars = [math.exp(lv) for lv in predicted_logvars]
