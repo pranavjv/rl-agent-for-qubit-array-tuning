@@ -1,3 +1,9 @@
+"""
+This script generates random data samples on the fly
+with varying levels of nosie and adjustable parameters
+to assess the robustness of the capacitance prediction model
+"""
+
 import numpy as np
 import sys
 import os
@@ -12,7 +18,6 @@ src_dir = swarm_package_dir.parent  # src directory
 sys.path.insert(0, str(src_dir))
 
 from swarm.environment.qarray_base_class import QarrayBaseClass
-from swarm.capacitance_model.dataset_generator import generate_sample
 from swarm.capacitance_model.CapacitancePrediction import CapacitancePredictionModel
 from swarm.capacitance_model.BayesianUpdater import CapacitancePredictor
 from swarm.capacitance_model.dataloader import PercentileNormalize, get_channel_targets

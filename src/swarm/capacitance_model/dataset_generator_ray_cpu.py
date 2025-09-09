@@ -49,6 +49,8 @@ class GenerationConfig:
     batch_size: int = 1000
     voltage_offset_range: float = 0.1
     seed_base: int = 42
+    min_obs_voltage_size: float = 0.5 # allows adjustable random window width, set equal to give fixed values
+    max_obs_voltage_size: float = 1.5 #
 
 
 def generate_sample(sample_id: int, config: GenerationConfig) -> Dict[str, Any]:
@@ -75,12 +77,14 @@ def generate_sample(sample_id: int, config: GenerationConfig) -> Dict[str, Any]:
     try:
         # Create QarrayBaseClass instance with unique seed per sample
         np.random.seed(config.seed_base + sample_id)
+
+        obs_voltage_size = np.random.uniform(config.min_obs_voltage_size, config.max_obs_voltage_size)
         
         qarray = QarrayBaseClass(
             num_dots=config.num_dots,
             config_path=config.config_path,
-            obs_voltage_min=-1.0,
-            obs_voltage_max=1.0,
+            obs_voltage_min=-obs_voltage_size,
+            obs_voltage_max=obs_voltage_size,
             obs_image_size=128
         )
         
@@ -323,7 +327,9 @@ def generate_dataset(config: GenerationConfig) -> None:
             'config_path': config.config_path,
             'batch_size': config.batch_size,
             'voltage_offset_range': config.voltage_offset_range,
-            'seed_base': config.seed_base
+            'seed_base': config.seed_base,
+            'min_obs_voltage_size': config.min_obs_voltage_size,
+            'max_obs_voltage_size': config.max_obs_voltage_size
         }
         
         # Process samples in smaller Ray batches to prevent memory issues
@@ -440,6 +446,10 @@ def main():
                        help='Path to qarray configuration file')
     parser.add_argument('--voltage_offset_range', type=float, default=0.1,
                        help='Range for random voltage offset from ground truth')
+    parser.add_argument('--min_obs_voltage_size', type=float, default=0.5,
+                       help='Minimum observation voltage window size (symmetric around 0)')
+    parser.add_argument('--max_obs_voltage_size', type=float, default=1.5,
+                       help='Maximum observation voltage window size (symmetric around 0)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Base random seed for reproducibility')
     
@@ -454,7 +464,9 @@ def main():
         config_path=args.config_path,
         batch_size=args.batch_size,
         voltage_offset_range=args.voltage_offset_range,
-        seed_base=args.seed
+        seed_base=args.seed,
+        min_obs_voltage_size=args.min_obs_voltage_size,
+        max_obs_voltage_size=args.max_obs_voltage_size
     )
     
     # Run dataset generation

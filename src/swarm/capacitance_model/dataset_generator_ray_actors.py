@@ -44,6 +44,8 @@ class GenerationConfig:
     batch_size: int = 1000
     voltage_offset_range: float = 0.1
     seed_base: int = 42
+    min_obs_voltage_size: float = 0.5 # allows adjustable random window width, set equal to give fixed values
+    max_obs_voltage_size: float = 1.5 #
 
 def enforce_cuda_availability(gpu_ids_str: str) -> List[int]:
     """Enforce CUDA is available for specified GPUs, return GPU list"""
@@ -119,11 +121,13 @@ class QarrayWorkerActor:
         try:
             np.random.seed(self.config.seed_base + sample_id)
 
+            obs_voltage_size = np.random.uniform(self.config.min_obs_voltage_size, self.config.max_obs_voltage_size)
+
             qarray = self.qarray_class(
                 num_dots=self.config.num_dots,
                 config_path=self.config.config_path,
-                obs_voltage_min=-1.0,
-                obs_voltage_max=1.0,
+                obs_voltage_min=-obs_voltage_size,
+                obs_voltage_max=obs_voltage_size,
                 obs_image_size=128
             )
             
@@ -277,7 +281,9 @@ def run_test_mode(config: GenerationConfig) -> None:
             'gpu_ids': config.gpu_ids,
             'batch_size': config.batch_size,
             'voltage_offset_range': config.voltage_offset_range,
-            'seed_base': config.seed_base
+            'seed_base': config.seed_base,
+            'min_obs_voltage_size': config.min_obs_voltage_size,
+            'max_obs_voltage_size': config.max_obs_voltage_size
         }
         
         # Create one actor (use first GPU for test mode)
@@ -457,7 +463,9 @@ def generate_dataset(config: GenerationConfig) -> None:
             'gpu_ids': config.gpu_ids,
             'batch_size': config.batch_size,
             'voltage_offset_range': config.voltage_offset_range,
-            'seed_base': config.seed_base
+            'seed_base': config.seed_base,
+            'min_obs_voltage_size': config.min_obs_voltage_size,
+            'max_obs_voltage_size': config.max_obs_voltage_size
         }
         
         # Create one QarrayWorkerActor per GPU
@@ -645,6 +653,10 @@ def main():
                        help='Path to qarray configuration file')
     parser.add_argument('--voltage_offset_range', type=float, default=0.1,
                        help='Range for random voltage offset from ground truth')
+    parser.add_argument('--min_obs_voltage_size', type=float, default=0.5,
+                       help='Minimum observation voltage window size (symmetric around 0)')
+    parser.add_argument('--max_obs_voltage_size', type=float, default=1.5,
+                       help='Maximum observation voltage window size (symmetric around 0)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Base random seed for reproducibility')
     parser.add_argument('--gpu_ids', type=str, default="7",
@@ -667,7 +679,9 @@ def main():
         gpu_ids=args.gpu_ids,
         batch_size=args.batch_size,
         voltage_offset_range=args.voltage_offset_range,
-        seed_base=args.seed
+        seed_base=args.seed,
+        min_obs_voltage_size=args.min_obs_voltage_size,
+        max_obs_voltage_size=args.max_obs_voltage_size
     )
     
     # Run dataset generation

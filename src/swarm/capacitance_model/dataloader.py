@@ -7,7 +7,7 @@ from typing import Tuple, List, Optional, Union
 from sklearn.model_selection import train_test_split
 
 
-def get_channel_targets(channel_idx: int, cgd_matrix: np.ndarray, num_dots: int) -> np.ndarray:
+def get_channel_targets(channel_idx: int, cgd_matrix: np.ndarray, num_dots: int, has_sensor: bool = True) -> np.ndarray:
     """
     Get the target CGD values for a specific channel.
     
@@ -25,8 +25,13 @@ def get_channel_targets(channel_idx: int, cgd_matrix: np.ndarray, num_dots: int)
     Returns:
         List of 3 target values for this channel
     """
+
     assert channel_idx in list(range(num_dots-1)), f"Out-of-bounds channel index given for {num_dots} dots."
-    assert cgd_matrix.shape[0] == cgd_matrix.shape[1] - 1 == num_dots, f"CGD matrix must have shape ({num_dots}, {num_dots+1})"
+
+    if has_sensor:
+        assert cgd_matrix.shape[0] == cgd_matrix.shape[1] - 1 == num_dots, f"CGD matrix must have shape ({num_dots}, {num_dots+1})"
+    else:
+        assert cgd_matrix.shape[0] == cgd_matrix.shape[1] == num_dots, f"CGD matrix must have shape ({num_dots}, {num_dots})"
 
     # Extract the pairs of dots to consider for the channel index (0-indexed)
     left_pair = (channel_idx-1, channel_idx+1) # out of bounds for channel 0

@@ -21,6 +21,11 @@ from typing import Dict, Any
 import logging
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+# os.environ['JAX_PLATFORM_NAME'] = 'cpu'
+# os.environ['CUDA_VISIBLE_DEVICES'] = ''
+# print("Warning: using CPU for dataset generation, disable these settings in dataset_generator.py to run JAX on GPU")
 
 # Add src directory to path for clean imports
 from pathlib import Path
@@ -43,6 +48,8 @@ class GenerationConfig:
     batch_size: int = 1000
     voltage_offset_range: float = 0.1
     seed_base: int = 42
+    min_obs_voltage_size: float = 0.5 # allows adjustable random window width, set equal to give fixed values
+    max_obs_voltage_size: float = 1.5 #
 
 
 def generate_sample(sample_id: int, config: GenerationConfig) -> Dict[str, Any]:
@@ -59,12 +66,14 @@ def generate_sample(sample_id: int, config: GenerationConfig) -> Dict[str, Any]:
     try:
         # Create QarrayBaseClass instance with unique seed per sample
         np.random.seed(config.seed_base + sample_id)
+
+        obs_voltage_size = np.random.uniform(config.min_obs_voltage_size, config.max_obs_voltage_size)
         
         qarray = QarrayBaseClass(
             num_dots=config.num_dots,
             config_path=config.config_path,
-            obs_voltage_min=-1.0,
-            obs_voltage_max=1.0,
+            obs_voltage_min=-obs_voltage_size,
+            obs_voltage_max=obs_voltage_size,
             obs_image_size=128
         )
         
@@ -335,6 +344,9 @@ def generate_dataset(config: GenerationConfig) -> None:
         batch_samples = []
         current_batch_id = 0
         
+        # Create progress bar
+        pbar = tqdm(total=config.total_samples, desc="Generating samples", unit="samples")
+        
         # Process completed jobs
         for future in as_completed(future_to_id):
             sample_id = future_to_id[future]
@@ -347,35 +359,43 @@ def generate_dataset(config: GenerationConfig) -> None:
                 else:
                     failed_samples += 1
                 
+                # Update progress bar
+                total_processed = successful_samples + failed_samples
+                elapsed = time.time() - start_time
+                rate = total_processed / elapsed if elapsed > 0 else 0
+                
+                pbar.set_postfix({
+                    'Success': successful_samples,
+                    'Failed': failed_samples,
+                    'Rate': f'{rate:.1f}/s',
+                    'Batches': f'{saved_batches}/{num_batches}'
+                })
+                pbar.update(1)
+                
                 # Save batch when full or at end
                 if (len(batch_samples) >= config.batch_size or 
                     successful_samples + failed_samples == config.total_samples):
                     
                     if save_batch(current_batch_id, batch_samples, output_dir):
                         saved_batches += 1
+                        pbar.set_postfix({
+                            'Success': successful_samples,
+                            'Failed': failed_samples,
+                            'Rate': f'{rate:.1f}/s',
+                            'Batches': f'{saved_batches}/{num_batches}'
+                        })
                         logger.info(f"Saved batch {current_batch_id} ({len(batch_samples)} samples)")
                     
                     # Reset for next batch
                     batch_samples = []
                     current_batch_id += 1
-                
-                # Progress reporting
-                total_processed = successful_samples + failed_samples
-                if total_processed % max(1, config.total_samples // 10) == 0:
-                    elapsed = time.time() - start_time
-                    rate = total_processed / elapsed if elapsed > 0 else 0
-                    eta = (config.total_samples - total_processed) / rate if rate > 0 else 0
-                    logger.info(
-                        f"Progress: {total_processed}/{config.total_samples} "
-                        f"({total_processed/config.total_samples*100:.1f}%) | "
-                        f"Rate: {rate:.1f} samples/sec | "
-                        f"Batches saved: {saved_batches}/{num_batches} | "
-                        f"ETA: {eta/60:.1f} min"
-                    )
                     
             except Exception as e:
                 logger.error(f"Error processing sample {sample_id}: {e}")
                 failed_samples += 1
+                pbar.update(1)
+        
+        pbar.close()
     
     # Final statistics
     total_time = time.time() - start_time
@@ -402,7 +422,7 @@ def generate_dataset(config: GenerationConfig) -> None:
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(description='Generate quantum device dataset')
-    parser.add_argument('--total_samples', type=int, default=20000,
+    parser.add_argument('--total_samples', type=int, default=10000,
                        help='Total number of samples to generate')
     parser.add_argument('--workers', type=int, default=8,
                        help='Number of worker processes')
@@ -416,6 +436,10 @@ def main():
                        help='Path to qarray configuration file')
     parser.add_argument('--voltage_offset_range', type=float, default=0.1,
                        help='Range for random voltage offset from ground truth')
+    parser.add_argument('--min_obs_voltage_size', type=float, default=0.5,
+                       help='Minimum observation voltage window size (symmetric around 0)')
+    parser.add_argument('--max_obs_voltage_size', type=float, default=1.5,
+                       help='Maximum observation voltage window size (symmetric around 0)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Base random seed for reproducibility')
     parser.add_argument('--test', action='store_true',
@@ -436,7 +460,9 @@ def main():
         config_path=args.config_path,
         batch_size=args.batch_size,
         voltage_offset_range=args.voltage_offset_range,
-        seed_base=args.seed
+        seed_base=args.seed,
+        min_obs_voltage_size=args.min_obs_voltage_size,
+        max_obs_voltage_size=args.max_obs_voltage_size,
     )
     
     # Run in test mode or normal generation mode
