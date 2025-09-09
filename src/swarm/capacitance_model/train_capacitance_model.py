@@ -679,8 +679,8 @@ def main():
                        help='Validation split fraction')
     parser.add_argument('--num_workers', type=int, default=4,
                        help='Number of data loading workers')
-    parser.add_argument('--load_to_memory', action='store_true',
-                       help='Load all data to memory (requires ~15GB RAM)')
+    parser.add_argument('--disable_data_loading', action='store_true',
+                       help='Disable loading all data to memory (requires ~15GB RAM)')
     parser.add_argument('--mse_weight', type=float, default=100.0,
                        help='Weight for MSE loss component')
     parser.add_argument('--nll_weight', type=float, default=0.1,
@@ -697,9 +697,7 @@ def main():
                        help='Disable wandb logging')
     
     args = parser.parse_args()
-
-    if not args.load_to_memory:
-        print("Warning: load to memory not enabled. Training may be MUCH slower")
+    args.load_to_memory = not args.disable_data_loading
     
     gpu_list = []
     for gpu_arg in args.gpus:

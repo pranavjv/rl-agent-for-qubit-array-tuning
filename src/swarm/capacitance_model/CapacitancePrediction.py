@@ -96,10 +96,26 @@ class CapacitanceLoss(nn.Module):
     Combines MSE loss for values with negative log-likelihood loss for confidence.
     """
     
-    def __init__(self, mse_weight=1.0, nll_weight=1.0):
+    def __init__(self, mse_weight=1.0, nll_weight=1.0, beta=0.5):
         super(CapacitanceLoss, self).__init__()
         self.mse_weight = mse_weight
         self.nll_weight = nll_weight
+        self.beta = beta
+
+
+    def _beta_nll_loss(self, mean, logvar, target):
+        """Beta NLL loss to improve variance prediction stability"""
+        var = torch.exp(logvar)
+        errors = (mean - target) ** 2
+
+        nll = 0.5 * (logvar + errors / var)
+
+        if self.beta > 0:
+            weights = var.detach() ** self.beta
+            nll = nll * weights
+        
+        return nll.mean(), errors
+
     
     def forward(self, predictions, targets):
         """
@@ -120,19 +136,7 @@ class CapacitanceLoss(nn.Module):
         mse_loss = F.mse_loss(values, targets)
         
         # Negative log-likelihood loss with predicted uncertainty
-        # NLL = 0.5 * (log(2π) + log_var + (target - pred)^2 / exp(log_var))
-        variances = torch.exp(log_vars)
-        squared_errors = (targets - values) ** 2
-        
-        # nll_loss = 0.5 * (
-        #     torch.log(2 * torch.pi * variances) + 
-        #     squared_errors / variances
-        # ).mean()
-
-        nll_loss = 0.5 * (
-            log_vars + 
-            squared_errors / variances
-        ).mean()
+        nll_loss, squared_errors = self._beta_nll_loss(values, log_vars, targets)
 
         # Combined loss
         total_loss = self.mse_weight * mse_loss + self.nll_weight * nll_loss
