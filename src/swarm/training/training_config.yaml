@@ -38,15 +38,15 @@ ray:
 ppo:
   # Environment runners configuration
   env_runners:
-    num_env_runners: 10              # Number of parallel environment runners
+    num_env_runners: 20              # Number of parallel environment runners
     rollout_fragment_length: 50     # Steps per rollout fragment
     sample_timeout_s: 600.0         # Timeout for sampling
-    num_gpus_per_env_runner: 0.6    # GPU allocation per runner
+    num_gpus_per_env_runner: 0.3    # GPU allocation per runner
 
   # Learner configuration  
   learners:
-    num_learners: 1                 # Number of learner workers
-    num_gpus_per_learner: 0.75      # GPU allocation per learner
+    num_learners: 4                 # Number of learner workers
+    num_gpus_per_learner: 0.3      # GPU allocation per learner
 
   # Training hyperparameters
   training:
