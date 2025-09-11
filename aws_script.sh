@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-BUCKET="s3://your-bucket/checkpoints"
+BUCKET="s3://rahul-ml-checkpoints/checkpoints"
 CODE_REPO="https://github.com/edwindn/rl-agent-for-qubit-array-tuning.git"
 CODE_DIR="/home/ec2-user/rl-agent"
 CHECKPOINT_DIR="$CODE_DIR/src/swarm/training/checkpoints"
