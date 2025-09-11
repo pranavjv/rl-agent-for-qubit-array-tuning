@@ -10,7 +10,10 @@ import sys
 os.environ["PYTHONWARNINGS"] = "ignore::DeprecationWarning"
 os.environ["RAY_DEDUP_LOGS"] = "0"
 
+import argparse
+import glob
 import logging
+import re
 import yaml
 
 # Memory monitoring imports
@@ -45,6 +48,62 @@ from swarm.training.utils import (  # noqa: E402
 from swarm.voltage_model import create_rl_module_spec
 
 
+def find_latest_checkpoint(checkpoint_dir):
+    """Find the most recent checkpoint in the given directory.
+    
+    Args:
+        checkpoint_dir (str or Path): Directory containing checkpoint folders
+        
+    Returns:
+        tuple: (checkpoint_path, iteration_number) or (None, None) if no checkpoints found
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    
+    if not checkpoint_dir.exists():
+        return None, None
+    
+    # Find all iteration directories
+    iteration_pattern = checkpoint_dir / "iteration_*"
+    iteration_dirs = glob.glob(str(iteration_pattern))
+    
+    if not iteration_dirs:
+        return None, None
+    
+    # Extract iteration numbers and find the maximum
+    max_iteration = 0
+    latest_checkpoint = None
+    
+    for iteration_dir in iteration_dirs:
+        # Extract iteration number from directory name
+        match = re.search(r'iteration_(\d+)', iteration_dir)
+        if match:
+            iteration_num = int(match.group(1))
+            if iteration_num > max_iteration:
+                max_iteration = iteration_num
+                latest_checkpoint = iteration_dir
+    
+    return latest_checkpoint, max_iteration
+
+
+def parse_arguments():
+    """Parse command line arguments for checkpoint loading."""
+    parser = argparse.ArgumentParser(description='Multi-agent RL training for quantum device tuning')
+    
+    parser.add_argument(
+        '--load-checkpoint', 
+        type=str, 
+        help='Path to specific checkpoint directory to load'
+    )
+    
+    parser.add_argument(
+        '--resume-latest', 
+        action='store_true',
+        help='Resume training from the most recent checkpoint in the default checkpoints directory'
+    )
+    
+    return parser.parse_args()
+
+
 
 def create_env(config=None):
     """Create multi-agent quantum environment."""
@@ -67,6 +126,9 @@ def load_config():
 def main():
     """Main training function using Ray RLlib 2.49.0 modern API with wandb logging."""
 
+    # Parse command line arguments
+    args = parse_arguments()
+    
     config = load_config()
 
     # Initialize Weights & Biases
@@ -149,6 +211,63 @@ def main():
         env_instance.close()
         del env_instance
 
+        # Handle checkpoint loading if requested
+        start_iteration = 0
+        checkpoint_loaded = False
+        
+        if args.load_checkpoint:
+            # Load specific checkpoint
+            checkpoint_path = Path(args.load_checkpoint)
+            if checkpoint_path.exists():
+                print(f"\nLoading checkpoint from: {checkpoint_path}")
+                try:
+                    algo.restore_from_path(str(checkpoint_path))
+                    
+                    # Extract iteration number from path
+                    match = re.search(r'iteration_(\d+)', str(checkpoint_path))
+                    if match:
+                        start_iteration = int(match.group(1))
+                        checkpoint_loaded = True
+                        print(f"Checkpoint loaded successfully. Resuming from iteration {start_iteration + 1}")
+                    else:
+                        print("Warning: Could not determine iteration number from checkpoint path")
+                        
+                except Exception as e:
+                    print(f"Error loading checkpoint: {e}")
+                    print("Continuing with fresh training...")
+            else:
+                print(f"Error: Checkpoint path does not exist: {checkpoint_path}")
+                print("Continuing with fresh training...")
+                
+        elif args.resume_latest:
+            # Find and load most recent checkpoint
+            checkpoint_dir = Path(config['checkpoints']['save_dir'])
+            latest_checkpoint, latest_iteration = find_latest_checkpoint(checkpoint_dir)
+            
+            if latest_checkpoint:
+                print(f"\nFound latest checkpoint: {latest_checkpoint} (iteration {latest_iteration})")
+                try:
+                    algo.restore_from_path(str(latest_checkpoint))
+                    start_iteration = latest_iteration
+                    checkpoint_loaded = True
+                    print(f"Latest checkpoint loaded successfully. Resuming from iteration {start_iteration + 1}")
+                except Exception as e:
+                    print(f"Error loading latest checkpoint: {e}")
+                    print("Continuing with fresh training...")
+            else:
+                print("\nNo checkpoints found in checkpoint directory.")
+                print("Starting fresh training...")
+        
+        if not checkpoint_loaded:
+            print("\nStarting fresh training from iteration 1...")
+        else:
+            print(f"Training will continue from iteration {start_iteration + 1} to {config['defaults']['num_iterations']}")
+            # Validate that we haven't already completed training
+            if start_iteration >= config['defaults']['num_iterations']:
+                print(f"Training already completed! Loaded checkpoint is at iteration {start_iteration}, "
+                      f"but max iterations is {config['defaults']['num_iterations']}.")
+                return
+
         # Save training config to checkpoint directory for easy reference
         checkpoint_base_dir = Path(config['checkpoints']['save_dir'])
         checkpoint_base_dir.mkdir(parents=True, exist_ok=True)
@@ -156,13 +275,14 @@ def main():
         with open(config_save_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-        print(f"\nStarting training for {config['defaults']['num_iterations']} iterations...\n")
+        remaining_iterations = config['defaults']['num_iterations'] - start_iteration
+        print(f"\nStarting training for {remaining_iterations} iterations (from iteration {start_iteration + 1} to {config['defaults']['num_iterations']})...\n")
         print(f"Training config saved to: {config_save_path}\n")
 
         training_start_time = time.time()
         best_reward = float("-inf")  # Track best performance for artifact upload
 
-        for i in range(config['defaults']['num_iterations']):
+        for i in range(start_iteration, config['defaults']['num_iterations']):
             result = algo.train()
 
             # Clean console output and wandb logging

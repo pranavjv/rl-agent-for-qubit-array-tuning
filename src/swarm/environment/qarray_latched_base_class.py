@@ -603,6 +603,8 @@ class QarrayBaseClass:
         # cdd = self.model.cdd_full  # Currently unused
         cdd_inv = self.model.cdd_inv_full
 
+        print(f"Cgd: {cgd}")
+
         numsensor = 1
 
         # Assumes Vb = 0
@@ -629,19 +631,26 @@ class QarrayBaseClass:
             -cdd_inv[:ndot, :ndot] @ cgd[:ndot, :ndot] @ plunger_optimal_physical
         )
 
+        print(f"Original Optimal VG: {self.model.optimal_Vg(self.optimal_VG_center)}")
+        print(f"Plunger optimal virtual: {plunger_optimal_virtual}")
+        print(f"Sensor optimal physical: {sensor_optimal_physical}")
+        print(f"Plunger optimal physical: {plunger_optimal_physical}")
+        print(f"VB optimal: {vb_optimal}")
+
         return plunger_optimal_virtual, vb_optimal, sensor_optimal_physical
 
 
 if __name__ == "__main__":
-    experiment = QarrayBaseClass(num_dots=3, obs_image_size=50)
+    experiment = QarrayBaseClass(num_dots=2, obs_image_size=100, obs_voltage_min=-2, obs_voltage_max=2)
 
     # Test optimal voltage calculation
     gt_vg, gt_vb, gt_vs = experiment.calculate_ground_truth()
+    
     print(f"Optimal voltages: {gt_vg}, {gt_vs}, {gt_vb}")
 
     # Test getting observations
-    gate_voltages = [0.0] * experiment.num_dots
-    barrier_voltages = [4.0] * experiment.num_barrier_voltages
+    #gate_voltages = [0.0] * experiment.num_dots
+    #barrier_voltages = [4.0] * experiment.num_barrier_voltages
 
     obs = experiment._get_obs(gt_vg, gt_vb)
     print("Observation shape:", obs["image"].shape)

@@ -455,10 +455,17 @@ class QuantumDeviceEnv(gym.Env):
                 0.8, 1.2, self.num_plunger_voltages
             ).astype(np.float32)
 
-            # Random offsets near 0.0 (between -0.1 and 0.1)
-            self.action_offset = np.random.uniform(-0.1, 0.1, self.num_plunger_voltages).astype(
+            # Random offsets
+            self.action_offset = np.random.uniform(self.action_offset_min+1, self.action_offset_max-1, self.num_plunger_voltages).astype(
                 np.float32
             )
+
+            self.window_size = np.random.uniform(0.5, 1.5, self.num_plunger_voltages).astype(np.float32)
+
+            self.obs_voltage_min = self.obs_voltage_min*self.window_size
+       
+            self.obs_voltage_max = self.obs_voltage_max*self.window_size
+            
         else:
             # No scaling during inference
             self.action_scale_factor = np.ones(self.num_plunger_voltages, dtype=np.float32)
