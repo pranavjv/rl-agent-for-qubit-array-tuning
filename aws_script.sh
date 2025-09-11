@@ -1,43 +1,59 @@
 #!/bin/bash
-# ==== User Data Script for Spot Instance Training ====
-
-# Fail on error
 set -e
 
-# Update + basic tools
+# Configuration
+BUCKET="s3://your-bucket/checkpoints"
+CODE_REPO="https://github.com/edwindn/rl-agent-for-qubit-array-tuning.git"
+CODE_DIR="/home/ec2-user/rl-agent"
+CHECKPOINT_DIR="$CODE_DIR/src/swarm/training/checkpoints"
+
+# Install prerequisites
 yum update -y
-yum install -y awscli git
+yum install -y awscli git python3 python3-pip
 
-# Set variables
-BUCKET="s3://my-ml-checkpoints"
-CODE_BUCKET="s3://my-ml-code"
-WORKDIR="/home/ec2-user/training"
-CHECKPOINT_DIR="$WORKDIR/checkpoints"
+# Setup working directory
+mkdir -p $CODE_DIR
+cd $CODE_DIR
 
-mkdir -p $WORKDIR
-cd $WORKDIR
-
-# Pull code and checkpoints
-aws s3 sync $CODE_BUCKET $WORKDIR/code
-aws s3 sync $BUCKET $CHECKPOINT_DIR
-
-# Find latest checkpoint if exists
-LATEST_CKPT=$(ls -t $CHECKPOINT_DIR/*.ckpt 2>/dev/null | head -n1 || true)
-
-# Start training (resume if checkpoint exists)
-if [ -n "$LATEST_CKPT" ]; then
-  echo "Resuming from checkpoint: $LATEST_CKPT"
-  nohup bash $WORKDIR/code/run_training.sh --resume-from $LATEST_CKPT > train.log 2>&1 &
+# Clone or update code
+if [ ! -d ".git" ]; then
+  git clone $CODE_REPO .
 else
-  echo "Starting fresh training run"
-  nohup bash $WORKDIR/code/run_training.sh > train.log 2>&1 &
+  git pull origin main
 fi
 
-# Background job to periodically sync checkpoints back to S3
+pip3 install --upgrade pip
+if [ -f "requirements.txt" ]; then
+    pip3 install -r requirements.txt
+fi
+
+# restores checkpoints from S3
+mkdir -p $CHECKPOINT_DIR
+aws s3 sync $BUCKET $CHECKPOINT_DIR
+
+# starts training (auto-resume latest)
+cd $CODE_DIR/src/swarm/training
+
+nohup python3 train.py --resume-latest > training.log 2>&1 &
+
+# syncs checkpoints
 (
   while true; do
-    sleep 900  # every 15 minutes
-    echo "Syncing checkpoints..."
+    sleep 600   # every 10 minutes
+    echo "$(date): Syncing checkpoints to S3"
     aws s3 sync $CHECKPOINT_DIR $BUCKET
+  done
+) &
+
+# checks for spot termination flag
+(
+  while true; do
+    if curl -s http://169.254.169.254/latest/meta-data/spot/termination-time; then
+      echo "$(date): Spot termination notice received"
+      # Final checkpoint sync
+      aws s3 sync $CHECKPOINT_DIR $BUCKET
+      exit 0
+    fi
+    sleep 5
   done
 ) &
