@@ -456,7 +456,7 @@ class QuantumDeviceEnv(gym.Env):
             ).astype(np.float32)
 
             # Random offsets
-            self.action_offset = np.random.uniform(self.action_offset_min+1, self.action_offset_max-1, self.num_plunger_voltages).astype(
+            self.action_offset = np.random.uniform(self.gate_voltage_min+1, self.gate_voltage_max-1, self.num_plunger_voltages).astype(
                 np.float32
             )
 
