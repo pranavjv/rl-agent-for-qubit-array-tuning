@@ -12,7 +12,7 @@ import yaml
 from qarray import ChargeSensedDotArray, LatchingModel, TelegraphNoise, WhiteNoise
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from environment.qarray_remap import QarrayRemapper
+from swarm.environment.qarray_remap import QarrayRemapper
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
