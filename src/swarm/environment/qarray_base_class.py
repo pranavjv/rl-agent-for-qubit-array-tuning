@@ -37,6 +37,7 @@ class QarrayBaseClass:
         obs_image_size=128,
         remap=False,
         debug=False,
+        param_overrides=None,
         **kwargs,
     ):
 
@@ -64,7 +65,7 @@ class QarrayBaseClass:
         ]  # must always call model.optimal_Vg on this
 
         # --- Initialize Model ---
-        self.model = self._load_model()
+        self.model = self._load_model(param_overrides)
 
         # --- Initialise remapping parameters ---
         self.remap = remap
@@ -326,7 +327,7 @@ class QarrayBaseClass:
             "p_inter": p_inter,
         }
 
-    def _gen_random_qarray_params(self, rng: np.random.Generator = None) -> dict:
+    def _gen_random_qarray_params(self, rng: np.random.Generator = None, param_overrides: dict = None) -> dict:
         """
         Generate random parameters for the quantum device using distance-based coupling rules.
 
@@ -335,6 +336,11 @@ class QarrayBaseClass:
         """
         if rng is None:
             rng = np.random.default_rng()
+
+        if param_overrides is None:
+            param_overrides = {}
+
+        self._validate_param_overrides(param_overrides)
 
         # Extract configuration ranges
         model_config = self.config["simulator"]["model"]
@@ -376,14 +382,17 @@ class QarrayBaseClass:
             "optimal_VG_center": measurement_config["optimal_VG_center"],
         }
 
+        self._apply_param_overrides(model_params, param_overrides)
+
         return model_params
 
-    def _load_model(self):
+
+    def _load_model(self, param_overrides: dict = None):
         """
         Load the model from the config file.
         """
 
-        model_params = self._gen_random_qarray_params()
+        model_params = self._gen_random_qarray_params(param_overrides=param_overrides)
 
         white_noise = WhiteNoise(amplitude=model_params["white_noise_amplitude"])
         telegraph_noise = TelegraphNoise(**model_params["telegraph_noise_parameters"])
@@ -449,6 +458,60 @@ class QarrayBaseClass:
         plt.savefig(f"{path}.png")
         plt.show()
         plt.close()
+
+    
+    def _validate_param_overrides(self, param_overrides: dict) -> None:
+        """
+        Validate that parameter override keys exist in the configuration.
+        
+        Args:
+            param_overrides (dict): Dictionary of parameter overrides
+            
+        Raises:
+            ValueError: If any override key doesn't exist in config
+        """
+        if not param_overrides:
+            return
+            
+        model_config = self.config['simulator']['model']
+        valid_params = set(model_config.keys())
+        
+        # Add nested parameter paths for complex structures
+        nested_params = {
+            'telegraph_noise_parameters.p01',
+            'telegraph_noise_parameters.p10_factor', 
+            'telegraph_noise_parameters.amplitude',
+            'latching_model_parameters.p_leads',
+            'latching_model_parameters.p_inter'
+        }
+        valid_params.update(nested_params)
+        
+        for param_key in param_overrides.keys():
+            if param_key not in valid_params:
+                available_params = sorted(valid_params)
+                raise ValueError(
+                    f"Invalid parameter override '{param_key}'. "
+                    f"Available parameters: {available_params}"
+                )
+
+    def _apply_param_overrides(self, model_params: dict, param_overrides: dict) -> None:
+        """
+        Apply parameter overrides to the generated model parameters.
+        
+        Args:
+            model_params (dict): Generated model parameters to modify
+            param_overrides (dict): Dictionary of parameter overrides
+        """
+        for param_key, override_value in param_overrides.items():
+            if '.' in param_key:
+                # Handle nested parameters like 'telegraph_noise_parameters.p01'
+                parent_key, child_key = param_key.split('.', 1)
+                if parent_key in model_params and isinstance(model_params[parent_key], dict):
+                    model_params[parent_key][child_key] = override_value
+            else:
+                # Handle top-level parameters
+                model_params[param_key] = override_value
+                
 
     def _load_config(self, config_path):
         """
