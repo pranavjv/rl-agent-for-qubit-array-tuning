@@ -10,6 +10,8 @@ import matplotlib
 import numpy as np
 import yaml
 from qarray import ChargeSensedDotArray, LatchingModel, TelegraphNoise, WhiteNoise
+
+# need to update qarray_latched with new branch
 from qarray_latched.DotArrays.barrier_voltage_model import BarrierVoltageModel
 from qarray_latched.DotArrays.TunnelCoupledChargeSensed import TunnelCoupledChargeSensed
 from qarray_latched.DotArrays.voltage_dependent_capacitance import (
