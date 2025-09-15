@@ -1,6 +1,6 @@
 # QArray
 # git+https://github.com/b-vanstraaten/qarray-latched.git@b46d353db97887025f06a17dd10d72869cd0a7d0
-git+ssh://git@github.com/b-vanstraaten/qarray-latched.git@b46d353db97887025f06a17dd10d72869cd0a7d0 # SSH URL
+git+ssh://git@github.com/b-vanstraaten/qarray-latched.git@c076d4cef57a071dd6e52458ad5937589747c18f
 qarray
 
 # Core ML/RL dependencies
