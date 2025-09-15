@@ -15,6 +15,7 @@ import glob
 import logging
 import re
 import yaml
+from functools import partial
 
 # Memory monitoring imports
 import time
@@ -100,6 +101,12 @@ def parse_arguments():
         action='store_true',
         help='Resume training from the most recent checkpoint in the default checkpoints directory'
     )
+
+    parser.add_argument(
+        '--disable-wandb',
+        action='store_true',
+        help='Disable Weights & Biases logging'
+    )
     
     return parser.parse_args()
 
@@ -107,10 +114,10 @@ def parse_arguments():
 
 def create_env(config=None):
     """Create multi-agent quantum environment."""
-    from swarm.environment.multi_agent_wrapper import MultiAgentQuantumWrapper
+    from swarm.environment.multi_agent_wrapper import MultiAgentEnvWrapper
 
     # Wrap in multi-agent wrapper (config unused but required by RLlib)
-    return MultiAgentQuantumWrapper(training=True)
+    return MultiAgentEnvWrapper()
 
 
 def load_config():
@@ -128,16 +135,19 @@ def main():
 
     # Parse command line arguments
     args = parse_arguments()
+
+    use_wandb = not args.disable_wandb
     
     config = load_config()
 
     # Initialize Weights & Biases
-    wandb.init(
-        entity=config['wandb']['entity'], 
-        project=config['wandb']['project'], 
-        config=config
-    )
-    setup_wandb_metrics()
+    if use_wandb:
+        wandb.init(
+            entity=config['wandb']['entity'], 
+            project=config['wandb']['project'], 
+            config=config
+        )
+        setup_wandb_metrics()
 
     # Initialize Ray with runtime environment from config
     ray_config = {
@@ -161,7 +171,6 @@ def main():
         register_env("qarray_multiagent_env", create_env)
         env_instance = create_env()
 
-        
         rl_module_spec = create_rl_module_spec(env_instance)
 
         ppo_config = (
@@ -313,8 +322,9 @@ def main():
         if ray.is_initialized():
             ray.shutdown()
 
-        wandb.finish()
-        print("Wandb session finished")
+        if use_wandb:
+            wandb.finish()
+            print("Wandb session finished")
 
 
 if __name__ == "__main__":

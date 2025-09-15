@@ -26,6 +26,8 @@ ray:
       - "outputs"
       - "test_outputs"
       - "checkpoints"
+      - "weights*"
+      - "*dataset*"
     
     env_vars:
       JAX_PLATFORM_NAME: "cuda"

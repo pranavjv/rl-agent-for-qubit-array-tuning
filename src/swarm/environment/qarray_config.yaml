@@ -121,3 +121,10 @@ simulator:
     #target tunnel coupling
     tc: 1e-4
 
+  latched_model:
+    use_sparse: False
+    num_charge_states: 32
+    charge_state_batch_size: 2000
+
+  voltage_capacitance_model:
+    type: "linear" #  None, 'linear', 'quadratic', etc.

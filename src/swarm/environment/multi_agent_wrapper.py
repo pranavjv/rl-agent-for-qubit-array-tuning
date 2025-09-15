@@ -21,7 +21,7 @@ sys.path.insert(0, str(src_dir))
 from swarm.environment.env import QuantumDeviceEnv
 
 
-class MultiAgentQuantumWrapper(MultiAgentEnv):
+class MultiAgentEnvWrapper(MultiAgentEnv):
     """
     Multi-agent wrapper that converts global env to individual agent interactions.
 
@@ -36,7 +36,7 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
     """
 
     def __init__(
-        self, training: bool = True, gpu: str | int = "auto", capacitance_model=None
+        self, training: bool = True, capacitance_model=None
     ):  # "fake"):
         """
         Initialize multi-agent wrapper.
@@ -49,10 +49,11 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
         super().__init__()
 
         self.base_env = QuantumDeviceEnv(
-            training=training, gpu=gpu, capacitance_model=capacitance_model
+            training=training, capacitance_model=capacitance_model
         )
 
         self.num_gates = self.base_env.num_dots
+        self.use_barriers = self.base_env.use_barriers
         self.num_barriers = self.base_env.num_dots - 1
         self.num_image_channels = self.base_env.num_dots - 1  # N-1 charge stability diagrams
 
@@ -361,26 +362,13 @@ class MultiAgentQuantumWrapper(MultiAgentEnv):
         return self.all_agent_ids.copy()
 
 
-# Factory function for Ray RLlib
-def make_multi_agent_env(config=None):
-    """
-    Factory function to create MultiAgentQuantumWrapper for Ray RLlib.
-
-    Args:
-        config: Configuration dictionary (unused but required by RLlib)
-    """
-    base_env = QuantumDeviceEnv(training=True)
-    num_dots = getattr(config, "num_quantum_dots", 8) if config else 8
-    return MultiAgentQuantumWrapper(base_env, num_quantum_dots=num_dots)
-
-
 if __name__ == "__main__":
     """Test the multi-agent wrapper."""
     print("=== Testing Multi-Agent Quantum Wrapper ===")
 
     try:
         # Create wrapper (no need for separate base_env)
-        wrapper = MultiAgentQuantumWrapper(num_dots=4, training=True)  # Small test
+        wrapper = MultiAgentEnvWrapper(num_dots=4, training=True)  # Small test
         print("✓ Created multi-agent wrapper")
 
         print(f"Agent IDs: {wrapper.get_agent_ids()}")

@@ -100,7 +100,7 @@ class QuantumDeviceCatalog(PPOCatalog):
             hidden_layers=policy_config.get("hidden_layers", [128, 128]),
             activation=policy_config.get("activation", "relu"),
             use_attention=policy_config.get("use_attention", False),
-            output_layer_dim=self.action_space.shape[0],
+            output_layer_dim=self.action_space.shape[0] * 2, # mean and log std for each action dimension
         )
         
         return config.build(framework=framework)

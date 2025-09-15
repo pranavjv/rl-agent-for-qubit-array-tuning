@@ -33,7 +33,6 @@ class QuantumDeviceEnv(gym.Env):
     def __init__(
         self,
         training=True,
-        gpu="auto",
         capacitance_model=None,
         config_path="env_config.yaml",
     ):
@@ -47,22 +46,8 @@ class QuantumDeviceEnv(gym.Env):
 
         self.config = self._load_config(config_path)
         self.training = training  # if we are training or not
-        self.num_dots = self.config["simulator"]["num_dots"]
-
-        # Assign the correct env device
-        if gpu == "auto":
-            self.gpu = gpu
-        else:
-            try:
-                gpu = int(gpu) if isinstance(gpu, str) and gpu.isdigit() else gpu
-                visible_devices = list(range(torch.cuda.device_count()))
-                assert (
-                    gpu in visible_devices
-                ), f"GPU device not found, got {gpu} but expected one of {visible_devices}"
-                self.gpu = gpu
-            except Exception as e:
-                print(f"Warning, setting gpu='auto': {e}")
-                self.gpu = "auto"
+        self.num_dots = self.config['simulator']['num_dots']
+        self.use_barriers = self.config['simulator']['use_barriers']
 
         # obs voltage min/max define the range over which we sweep the 2d csd pairs
         self.obs_voltage_min = self.config["simulator"]["measurement"]["gate_voltage_sweep_range"][
@@ -75,6 +60,7 @@ class QuantumDeviceEnv(gym.Env):
         self.obs_image_size = self.config["simulator"]["measurement"]["resolution"]
         self.array = QarrayBaseClass(
             num_dots=self.num_dots,
+            use_barriers=self.use_barriers,
             obs_voltage_min=self.obs_voltage_min,
             obs_voltage_max=self.obs_voltage_max,
             obs_image_size=self.obs_image_size,
@@ -173,6 +159,7 @@ class QuantumDeviceEnv(gym.Env):
         self.current_step = 0
         self.array = QarrayBaseClass(
             num_dots=self.num_dots,
+            use_barriers=self.use_barriers,
             obs_voltage_min=self.obs_voltage_min,
             obs_voltage_max=self.obs_voltage_max,
             obs_image_size=self.obs_image_size,
@@ -460,7 +447,7 @@ class QuantumDeviceEnv(gym.Env):
                 np.float32
             )
 
-            self.window_size = np.random.uniform(0.5, 1.5, self.num_plunger_voltages).astype(np.float32)
+            self.window_size = np.random.uniform(0.5, 1.5) # single consistent window size
 
             self.obs_voltage_min = self.obs_voltage_min*self.window_size
        
@@ -485,10 +472,7 @@ class QuantumDeviceEnv(gym.Env):
 
             # Determine device (GPU if available, otherwise CPU)
             if torch.cuda.is_available():
-                if self.gpu == "auto":
-                    device = torch.device("cuda")
-                else:
-                    device = torch.device(f"cuda:{self.gpu}")
+                device = torch.device("cuda")
                 print(f"Running capacitance model on {device}")
             else:
                 device = torch.device("cpu")
@@ -601,7 +585,7 @@ class QuantumDeviceEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = QuantumDeviceEnv(num_dots=4, gpu=1)
+    env = QuantumDeviceEnv()
     env.reset()
     print(env.observation_space)
     print(env.action_space)

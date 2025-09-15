@@ -70,6 +70,8 @@ class QarrayBaseClass:
 
         # --- Initialize Model ---
         self.model = self._load_model(param_overrides)
+        self.model.use_sparse = self.config['simulator']['latched_model']['use_sparse']
+        self.model.num_charge_states = self.config['simulator']['latched_model']['num_charge_states']
 
 
     def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2, barrier_voltages=None):
@@ -88,7 +90,7 @@ class QarrayBaseClass:
         """
 
         if not self.use_barriers:
-            assert barrier_voltages is None, "Barrier voltages provided but model is not configured for barriers"
+            # assert barrier_voltages is None, "Barrier voltages provided but model is not configured for barriers"
 
             z, _ = self.model.do2d_open(
                 gate1,
@@ -151,8 +153,8 @@ class QarrayBaseClass:
         allgates = list(range(1, self.num_dots + 1))  # Gate numbers for qarray (1-indexed)
         all_z = []
         for i, (gate1, gate2) in enumerate(zip(allgates[:-1], allgates[1:])):
-            voltage1 = gate_voltages[i]  # Use 0-based indexing for gate_voltages array
-            voltage2 = gate_voltages[i + 1]  # Use 0-based indexing for gate_voltages array
+            voltage1 = float(gate_voltages[i])  # Use 0-based indexing for gate_voltages array
+            voltage2 = float(gate_voltages[i + 1])  # Use 0-based indexing for gate_voltages array
             z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2, barrier_voltages)
             all_z.append(z)  # z is now 2D, no need to index [:, :, 0]
 
@@ -473,6 +475,7 @@ class QarrayBaseClass:
         # Extract configuration ranges
         model_config = self.config["simulator"]["model"]
         measurement_config = self.config["simulator"]["measurement"]
+        latched_config = self.config["simulator"]["latched_model"]
 
         config_ranges = {
             "Cdd": model_config["Cdd"],
@@ -534,6 +537,9 @@ class QarrayBaseClass:
             "implementation": model_config["implementation"],
             "max_charge_carriers": model_config["max_charge_carriers"],
             "optimal_VG_center": measurement_config["optimal_VG_center"],
+            "use_sparse": latched_config["use_sparse"],
+            "num_charge_states": latched_config["num_charge_states"],
+            "charge_state_batch_size": latched_config["charge_state_batch_size"],
         }
 
         self._apply_param_overrides(model_params, param_overrides)
@@ -655,17 +661,26 @@ class QarrayBaseClass:
             noise_model=noise_model,
             latching_model=latching_model,
             voltage_capacitance_model=None,  # Will be set below
+            use_sparse=model_params["use_sparse"],
+            num_charge_states=model_params["num_charge_states"],
+            charge_state_batch_size=model_params["charge_state_batch_size"],
         )
 
         # Create and set voltage-dependent capacitance model
         vc_params = model_params["voltage_capacitance_parameters"]
         voltage_capacitance_model = create_linear_capacitance_model(
-            cdd_0=jnp.array(model.cdd),
-            cgd_0=jnp.array(model.cgd),
+            cdd_0=jnp.array(model.cdd_full),
+            cgd_0=jnp.array(model.cgd_full),
             alpha=vc_params["alpha"],
             beta=vc_params["beta"],
         )
-        model.voltage_capacitance_model = voltage_capacitance_model
+
+        capacitance_model_type = self.config["simulator"]["voltage_capacitance_model"]["type"]
+        if capacitance_model_type is not None:
+            if capacitance_model_type == "linear":
+                model.voltage_capacitance_model = voltage_capacitance_model
+            else:
+                raise ValueError(f"Capacitance model type '{capacitance_model_type}' not implemented")
 
         return model
 
@@ -842,11 +857,16 @@ class QarrayBaseClass:
 
 
 if __name__ == "__main__":
-    num_dots = 2
+    num_dots = 4
 
     use_barriers = True
 
-    experiment = QarrayBaseClass(num_dots=num_dots, use_barriers=use_barriers)
+    experiment = QarrayBaseClass(
+        num_dots=num_dots,
+        use_barriers=use_barriers,
+        obs_voltage_min=-1.5,
+        obs_voltage_max=1.5,
+    )
     import time
 
     start = time.time()
