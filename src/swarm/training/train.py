@@ -218,9 +218,10 @@ def main():
     if use_wandb:
         wandb.init(
             entity=config['wandb']['entity'], 
-            project=config['wandb']['project'], 
-            config=config
+            project=config['wandb']['project']
         )
+        # Log the final config (with command line overrides) to wandb
+        wandb.config.update(config)
         setup_wandb_metrics()
 
     # Initialize Ray with runtime environment from config
@@ -256,8 +257,10 @@ def main():
                 "log_std_bounds": config['rl_config']['multi_agent']['log_std_bounds'],
             }
         }
+        
+        algo = config['rl_config']['algorithm'].lower()
 
-        rl_module_spec = create_rl_module_spec(env_instance, config=rl_module_config)
+        rl_module_spec = create_rl_module_spec(env_instance, algo=algo, config=rl_module_config)
 
         # Configure custom callbacks for logging to Wandb
         # log_images = config['wandb']['log_images']

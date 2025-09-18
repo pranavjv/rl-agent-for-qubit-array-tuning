@@ -1,12 +1,12 @@
-from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import (
-    DefaultPPOTorchRLModule,
-)
+from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import DefaultPPOTorchRLModule
+from ray.rllib.algorithms.sac.torch.default_sac_torch_rl_module import DefaultSACTorchRLModule
+
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec, RLModuleSpec
 
-from swarm.voltage_model.quantum_catalog import CustomPPOCatalog
+from swarm.voltage_model.custom_catalog import CustomPPOCatalog, CustomSACCatalog
 
 
-def create_rl_module_spec(env_instance, config: dict=None) -> MultiRLModuleSpec:
+def create_rl_module_spec(env_instance, algo: str="ppo", config: dict=None) -> MultiRLModuleSpec:
     """
     Create policy specifications for RLlib with the plunger and barrier policies
     (note there are only TWO policies although each has multiple agent instances)
@@ -103,22 +103,31 @@ def create_rl_module_spec(env_instance, config: dict=None) -> MultiRLModuleSpec:
     plunger_config = neural_networks_config.get('plunger_policy', {})
     barrier_config = neural_networks_config.get('barrier_policy', {})
 
+    if algo=="ppo":
+        module_class = DefaultPPOTorchRLModule
+        catalog_class = CustomPPOCatalog
+    elif algo=="sac":
+        module_class = DefaultSACTorchRLModule
+        catalog_class = CustomSACCatalog
+    else:
+        raise ValueError(f"Unsupported algorithm: {algo}")
+
     # Create single agent RLModule specs using new API
     plunger_spec = RLModuleSpec(
-        module_class=DefaultPPOTorchRLModule,
+        module_class=module_class,
         observation_space=gate_obs_space,
         action_space=gate_action_space,
         model_config=plunger_config,
-        catalog_class=CustomPPOCatalog,
+        catalog_class=catalog_class,
         inference_only=False,
     )
 
     barrier_spec = RLModuleSpec(
-        module_class=DefaultPPOTorchRLModule,
+        module_class=module_class,
         observation_space=barrier_obs_space,
         action_space=barrier_action_space,
         model_config=barrier_config,
-        catalog_class=CustomPPOCatalog,
+        catalog_class=catalog_class,
         inference_only=False,
     )
 
