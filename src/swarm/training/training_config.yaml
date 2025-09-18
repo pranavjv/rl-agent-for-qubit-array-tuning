@@ -40,7 +40,7 @@ ray:
 
 # Algorithm Configuration
 rl_config:
-  algorithm: "PPO" # PPO, SAC, T3D
+  algorithm: "SAC" # PPO or SAC
 
   # Environment runners configuration
   env_runners:
@@ -58,6 +58,11 @@ rl_config:
   training:
     train_batch_size: 4096          # Total batch size for training
     minibatch_size: 128             # Size of minibatches for SGD
+    num_epochs: 2                   # Number of SGD epochs per training iteration
+    grad_clip: 10.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
+    grad_clip_by: "norm"            # Gradient clipping method
+
+    # PPO-specific config
     lr: 0.0003                      # Learning rate
     gamma: 0.99                     # Discount factor
     lambda_: 0.95                   # GAE lambda parameter
@@ -65,9 +70,20 @@ rl_config:
     entropy_coeff: 0.01             # Entropy regularization coefficient
     vf_loss_coeff: 0.5              # Value function loss coefficient
     kl_target: 0.01                 # Target size of KL penalty on policy updates
-    num_epochs: 2                   # Number of SGD epochs per training iteration
-    grad_clip: 10.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
-    grad_clip_by: "norm"            # Gradient clipping method
+
+    # SAC-specific config
+    actor_lr: 0.0003
+    critic_lr: 0.0003
+    alpha_lr: 0.0003
+    twin_q: true                   # Whether to use twin Q-networks
+    tau: 0.005                     # Target network update rate
+    initial_alpha: 1.0              # Initial entropy coefficient 
+    target_entropy: "auto"       # Target entropy ("auto" to use default based on action space)
+    n_step: 1                # Number of steps to look ahead for multi-step returns
+    clip_actions: true          # Whether to clip actions to the action space bounds
+    target_network_update_freq: 1  # Frequency of target network updates (in training steps)
+    num_steps_sampled_before_learning_starts: 1000  # Number of steps to sample before starting learning
+
 
   # Multi-agent configuration
   multi_agent:

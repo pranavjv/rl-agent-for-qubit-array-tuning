@@ -266,8 +266,42 @@ def main():
         # log_images = config['wandb']['log_images']
         # custom_callbacks = partial(CustomCallbacks, log_images=log_images)
 
-        ppo_config = (
-            PPOConfig()
+        # Specify algorithm-specific training parameters
+        ppo_train_config = {
+            "lr": config['rl_config']['training']['lr'],
+            "gamma": config['rl_config']['training']['gamma'],
+            "lambda_": config['rl_config']['training']['lambda_'],
+            "clip_param": config['rl_config']['training']['clip_param'],
+            "entropy_coeff": config['rl_config']['training']['entropy_coeff'],
+            "vf_loss_coeff": config['rl_config']['training']['vf_loss_coeff'],
+            "kl_target": config['rl_config']['training']['kl_target'],
+        }
+
+        sac_train_config = {
+            "actor_lr": config['rl_config']['training']['actor_lr'],
+            "critic_lr": config['rl_config']['training']['critic_lr'],
+            "alpha_lr": config['rl_config']['training']['alpha_lr'],
+            "twin_q": config['rl_config']['training']['twin_q'],
+            "tau": config['rl_config']['training']['tau'],
+            "initial_alpha": config['rl_config']['training']['initial_alpha'],
+            "target_entropy": config['rl_config']['training']['target_entropy'],
+            "n_step": config['rl_config']['training']['n_step'],
+            "clip_actions": config['rl_config']['training']['clip_actions'],
+            "target_network_update_freq": config['rl_config']['training']['target_network_update_freq'],
+            "num_steps_sampled_before_learning_starts": config['rl_config']['training']['num_steps_sampled_before_learning_starts'],
+        }
+
+        if algo == "ppo":
+            algo_config_builder = PPOConfig
+            train_config = ppo_train_config
+        elif algo == "sac":
+            algo_config_builder = SACConfig
+            train_config = sac_train_config
+        else:
+            raise ValueError(f"Unsupported algorithm: {algo}")
+
+        algo_config = (
+            algo_config_builder()
             .environment(
                 env="qarray_multiagent_env",
             )
@@ -293,24 +327,19 @@ def main():
             .training(
                 train_batch_size=config['rl_config']['training']['train_batch_size'],
                 minibatch_size=config['rl_config']['training']['minibatch_size'],
-                lr=config['rl_config']['training']['lr'],
-                gamma=config['rl_config']['training']['gamma'],
-                lambda_=config['rl_config']['training']['lambda_'],
-                clip_param=config['rl_config']['training']['clip_param'],
-                entropy_coeff=config['rl_config']['training']['entropy_coeff'],
-                vf_loss_coeff=config['rl_config']['training']['vf_loss_coeff'],
                 num_epochs=config['rl_config']['training']['num_epochs'],
                 grad_clip=config['rl_config']['training']['grad_clip'],
                 grad_clip_by=config['rl_config']['training']['grad_clip_by'],
+                **train_config,
             )
             .resources(num_gpus=config['resources']['num_gpus'])
             # .callbacks([custom_callbacks] if use_wandb else [])
         )
 
         # Build the algorithm
-        print("\nBuilding PPO algorithm...\n")
+        print(f"\nBuilding {algo} algorithm...\n")
 
-        algo = ppo_config.build()  # creates a PPO object
+        algo = algo_config.build()
 
         # Clean up the environment instance used for spec creation
         env_instance.close()
