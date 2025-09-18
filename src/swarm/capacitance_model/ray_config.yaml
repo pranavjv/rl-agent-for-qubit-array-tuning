@@ -1,0 +1,40 @@
+# Ray configuration for dataset generation
+ray:
+  # Test mode settings
+  test_mode:
+    object_store_memory_gb: 2
+    include_dashboard: false
+    system_config:
+      max_io_workers: 4
+      object_timeout_milliseconds: 600000  # 10 minutes
+    actor_timeouts:
+      sample_generation: 300  # 5 minutes per sample in test mode
+      actor_initialization: 60  # 1 minute for actor startup
+
+  # Production/full generation settings  
+  production:
+    object_store_memory_gb: 8
+    include_dashboard: false
+    system_config:
+      max_io_workers: 4
+      object_timeout_milliseconds: 600000  # 10 minutes
+    actor_timeouts:
+      batch_generation: 600    # 10 minutes per batch
+      actor_initialization: 120  # 2 minutes for actor startup
+      chunk_processing: 600    # 10 minutes per chunk
+
+  # Actor resource allocation
+  actor:
+    num_cpus: 1
+    memory_gb: 4
+    gpu_memory_fraction: 0.8
+    
+  # Environment variables for actors
+  environment:
+    XLA_PYTHON_CLIENT_MEM_FRACTION: "0.8"
+    XLA_FLAGS: "--xla_gpu_enable_command_buffer="
+    TF_GPU_ALLOCATOR: "cuda_malloc_async"
+
+  # Chunk processing settings
+  processing:
+    chunk_size: 50  # Samples per actor per chunk

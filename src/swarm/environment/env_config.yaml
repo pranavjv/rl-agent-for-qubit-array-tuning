@@ -16,13 +16,19 @@ simulator:
     # Voltage sweep ranges for charge stability diagram
     gate_voltage_sweep_range: {"min": -1.0, "max": 1.0}
     # Total gate voltage range
-    gate_voltage_range: {"min": -50, "max": 50}
+    gate_voltage_range: {"min": -10, "max": 10}
     # Total barrier voltage range
     barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO
     # resolution for simulator images
     resolution: 100
 
+    # domain randomisation parameters
     random_window_size: {"min": 0.5, "max": 1.5}
+    random_action_scaling: {"min": 0.8, "max": 1.2}
+    random_action_offset: {"min": -0.2, "max": 0.2}
+
+capacitance_model:
+  update_method: "fake"  # Options: null (does not update vgm), "fake" (for testing/debugging), "bayesian" (simple prior), "kriging" (history based spatial prior)
 
 init:
   debug: false

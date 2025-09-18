@@ -36,8 +36,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
     """
 
     def __init__(
-        self, training: bool = True, capacitance_model=None
-    ):  # "fake"):
+        self, training: bool = True
+    ):
         """
         Initialize multi-agent wrapper.
 
@@ -48,9 +48,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         """
         super().__init__()
 
-        self.base_env = QuantumDeviceEnv(
-            training=training, capacitance_model=capacitance_model
-        )
+        self.base_env = QuantumDeviceEnv(training=training)
 
         self.num_gates = self.base_env.num_dots
         self.use_barriers = self.base_env.use_barriers
@@ -321,7 +319,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             agent_id in self.all_agent_ids for agent_id in agent_actions.keys()
         ), "Unknown agent IDs in actions"
 
-        print("[ENV DEBUG] env.step called")
+        # print("[ENV DEBUG] env.step called")
         # Combine agent actions into global action
         global_action = self._combine_agent_actions(agent_actions)
 

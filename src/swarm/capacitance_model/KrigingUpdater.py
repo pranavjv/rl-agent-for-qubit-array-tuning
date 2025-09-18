@@ -7,7 +7,7 @@ from functools import partial
 from sklearn.gaussian_process.kernels import RBF
 from sklearn.gaussian_process import GaussianProcessRegressor
 
-from capacitance_utils import get_channel_targets
+from swarm.capacitance_model.capacitance_utils import get_channel_targets
 get_channel_targets = partial(get_channel_targets, has_sensor=False)
 
 
@@ -40,7 +40,7 @@ class InterpolatedCapacitancePredictor:
         self,
         n_dots: int,
         prior_config: Union[Dict[Tuple[int, int], Tuple[float, float]], Callable],
-        length_scale: float = 0.5, # has dimensions of voltage
+        length_scale: float = 0.5, # has dimensions of voltage, hyperparameter
         noise_level: float = 1e-4,
         max_points_to_consider: int = 20,
     ):

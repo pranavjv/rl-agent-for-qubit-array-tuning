@@ -10,6 +10,8 @@ defaults:
 wandb:
   entity: "rl_agents_for_tuning"
   project: "RLModel"
+  
+  log_images: false        # Whether to log environment images to Wandb
 
 # Ray cluster configuration
 ray:
@@ -36,8 +38,10 @@ ray:
       RAY_DEDUP_LOGS: "0"
       RAY_DISABLE_IMPORT_WARNING: "1"
 
-# PPO Algorithm Configuration
-ppo:
+# Algorithm Configuration
+rl_config:
+  algorithm: "PPO" # PPO, SAC, T3D
+
   # Environment runners configuration
   env_runners:
     num_env_runners: 4              # Number of parallel environment runners
@@ -53,14 +57,17 @@ ppo:
   # Training hyperparameters
   training:
     train_batch_size: 4096          # Total batch size for training
-    minibatch_size: 64              # Size of minibatches for SGD
-    lr: 0.0003                      # Learning rate (3e-4)
+    minibatch_size: 128             # Size of minibatches for SGD
+    lr: 0.0003                      # Learning rate
     gamma: 0.99                     # Discount factor
     lambda_: 0.95                   # GAE lambda parameter
     clip_param: 0.2                 # PPO clipping parameter
     entropy_coeff: 0.01             # Entropy regularization coefficient
     vf_loss_coeff: 0.5              # Value function loss coefficient
-    num_epochs: 10                  # Number of SGD epochs per training iteration
+    kl_target: 0.01                 # Target size of KL penalty on policy updates
+    num_epochs: 2                   # Number of SGD epochs per training iteration
+    grad_clip: 10.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
+    grad_clip_by: "norm"            # Gradient clipping method
 
   # Multi-agent configuration
   multi_agent:
@@ -71,6 +78,10 @@ ppo:
       - "plunger_policy" 
       - "barrier_policy"
     count_steps_by: "agent_steps"
+
+    free_log_std: False         # Whether to predict the std (better exploration) or not (more stable)
+                                # Note this will affect how we extract the log std for logging
+    log_std_bounds: [-10, 2]    # Ranges within which to clip predicted log_std for the policy head
 
 # Resource allocation
 resources:
@@ -83,44 +94,45 @@ checkpoints:
 
 # Neural Network Architecture Configuration
 neural_networks:
+  # chosee between SimpleCNN or IMPALA
   plunger_policy:
     backbone:
-      type: "QuantumCNN"
+      type: "SimpleCNN"
       conv_layers:
         - {channels: 16, kernel: 4, stride: 2}
         - {channels: 32, kernel: 3, stride: 2}
         - {channels: 64, kernel: 3, stride: 1}
-      feature_size: 256
+      feature_size: 512
       adaptive_pooling: true
       lstm:
         enabled: true
-        cell_size: 128
+        cell_size: 512
         num_layers: 1
         max_seq_len: 50
         use_prev_action: true
         use_prev_reward: false
     policy_head:
-      hidden_layers: [128, 64]  
+      hidden_layers: [512, 256]  
       activation: "relu"
       use_attention: false
     value_head:
-      hidden_layers: [128, 64]
+      hidden_layers: [512, 256]
       activation: "relu"
       use_attention: false
 
   barrier_policy:
     backbone:
-      type: "QuantumCNN"
+      type: "SimpleCNN"
       conv_layers:
         - {channels: 8, kernel: 3, stride: 1}
-      feature_size: 2
+      feature_size: 128
       adaptive_pooling: true
       # No lstm section = no LSTM for barriers
     policy_head:
-      hidden_layers: [2, 2]  
+      hidden_layers: [32, 32]  
       activation: "relu"
       use_attention: false
     value_head:
-      hidden_layers: [2, 2]
+      hidden_layers: [32, 32]
       activation: "relu"
       use_attention: false

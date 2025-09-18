@@ -6,14 +6,14 @@ from ray.rllib.core.models.configs import ModelConfig
 from ray.rllib.utils.annotations import override
 
 from .custom_neural_nets import (
-    QuantumCNNConfig,
-    QuantumPolicyHeadConfig,
-    QuantumValueHeadConfig,
+    SimpleCNNConfig,
+    IMPALAConfig,
+    PolicyHeadConfig,
+    ValueHeadConfig,
 )
 
 
-
-class QuantumDeviceCatalog(PPOCatalog):
+class CustomPPOCatalog(PPOCatalog):
     """Custom catalog for quantum neural network components."""
     
     def __init__(
@@ -45,7 +45,7 @@ class QuantumDeviceCatalog(PPOCatalog):
             from ray.rllib.core.models.configs import RecurrentEncoderConfig
             
             # Create CNN tokenizer config (without LSTM)
-            tokenizer_config = QuantumCNNConfig(
+            tokenizer_config = SimpleCNNConfig(
                 input_dims=observation_space.shape,
                 cnn_activation=model_config_dict.get("conv_activation", "relu"),
                 conv_layers=backbone_config.get("conv_layers"),
@@ -68,7 +68,7 @@ class QuantumDeviceCatalog(PPOCatalog):
             )
         
         if isinstance(observation_space, Box) and len(observation_space.shape) == 3:
-            return QuantumCNNConfig(
+            return SimpleCNNConfig(
                 input_dims=observation_space.shape,
                 cnn_activation=model_config_dict.get("conv_activation", "relu"),
                 conv_layers=backbone_config.get("conv_layers"),
@@ -95,7 +95,7 @@ class QuantumDeviceCatalog(PPOCatalog):
         else:
             input_dim = backbone_config.get("feature_size", 256)
         
-        config = QuantumPolicyHeadConfig(
+        config = PolicyHeadConfig(
             input_dims=(input_dim,),
             hidden_layers=policy_config.get("hidden_layers", [128, 128]),
             activation=policy_config.get("activation", "relu"),
@@ -118,7 +118,7 @@ class QuantumDeviceCatalog(PPOCatalog):
         else:
             input_dim = backbone_config.get("feature_size", 256)
         
-        config = QuantumValueHeadConfig(
+        config = ValueHeadConfig(
             input_dims=(input_dim,),
             hidden_layers=value_config.get("hidden_layers", [128, 128]),
             activation=value_config.get("activation", "relu"),

@@ -16,8 +16,8 @@ def fake_capacitance_model(n_steps, max_steps, cgd, alpha=0.15, beta=0.05):
     base_std = beta + alpha * (1 - n_steps / max_steps)
 
     
-    error[one_off_mask == 1] = np.random.normal(0, base_std, np.sum(one_off_mask))
-    error[two_off_mask == 1] = np.random.normal(0, base_std * 0.5, np.sum(two_off_mask))
+    error[one_off_mask == 1] = np.random.normal(0, base_std, int(np.sum(one_off_mask)))
+    error[two_off_mask == 1] = np.random.normal(0, base_std * 0.5, int(np.sum(two_off_mask)))
     
     pred_cgd = np.clip(cgd + error, 0, 1)
 
