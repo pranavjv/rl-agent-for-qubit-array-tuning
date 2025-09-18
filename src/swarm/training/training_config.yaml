@@ -40,7 +40,7 @@ ray:
 
 # Algorithm Configuration
 rl_config:
-  algorithm: "SAC" # PPO or SAC
+  algorithm: "PPO" # PPO or SAC
 
   # Environment runners configuration
   env_runners:
@@ -83,6 +83,12 @@ rl_config:
     clip_actions: true          # Whether to clip actions to the action space bounds
     target_network_update_freq: 1  # Frequency of target network updates (in training steps)
     num_steps_sampled_before_learning_starts: 1000  # Number of steps to sample before starting learning
+    replay_buffer_config: {
+      "type": "MultiAgentPrioritizedEpisodeReplayBuffer",
+      "capacity": 1000000,                        # Replay buffer capacity
+      "alpha": 0.6,                               # Prioritization exponent
+      "beta": 0.4,                                # Importance sampling exponent
+    }
 
 
   # Multi-agent configuration
@@ -113,7 +119,7 @@ neural_networks:
   # chosee between SimpleCNN or IMPALA
   plunger_policy:
     backbone:
-      type: "SimpleCNN"
+      type: "IMPALA"
       conv_layers:
         - {channels: 16, kernel: 4, stride: 2}
         - {channels: 32, kernel: 3, stride: 2}
@@ -128,13 +134,13 @@ neural_networks:
         use_prev_action: true
         use_prev_reward: false
     policy_head:
-      hidden_layers: [512, 256]  
+      hidden_layers: [64, 64]  
       activation: "relu"
-      use_attention: false
+      use_attention: true
     value_head:
-      hidden_layers: [512, 256]
+      hidden_layers: [512, 64]
       activation: "relu"
-      use_attention: false
+      use_attention: true
 
   barrier_policy:
     backbone:

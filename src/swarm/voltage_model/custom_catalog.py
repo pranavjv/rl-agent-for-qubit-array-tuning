@@ -48,13 +48,28 @@ class CustomPPOCatalog(PPOCatalog):
             from ray.rllib.core.models.configs import RecurrentEncoderConfig
             
             # Create CNN tokenizer config (without LSTM)
-            tokenizer_config = SimpleCNNConfig(
-                input_dims=observation_space.shape,
-                cnn_activation=model_config_dict.get("conv_activation", "relu"),
-                conv_layers=backbone_config.get("conv_layers"),
-                feature_size=backbone_config.get("feature_size", 256),
-                adaptive_pooling=backbone_config.get("adaptive_pooling", True),
-            )
+            backbone_type = backbone_config.get("type", "SimpleCNN")
+            
+            if backbone_type == "IMPALA":
+                tokenizer_config = IMPALAConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                    num_res_blocks=backbone_config.get("num_res_blocks", 2),
+                )
+            elif backbone_type == "SimpleCNN":
+                tokenizer_config = SimpleCNNConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                )
+            
+            else:
+                raise ValueError(f"Unsupported backbone type: {backbone_type}")
             
             # Wrap CNN with LSTM
             return RecurrentEncoderConfig(
@@ -71,13 +86,28 @@ class CustomPPOCatalog(PPOCatalog):
             )
         
         if isinstance(observation_space, Box) and len(observation_space.shape) == 3:
-            return SimpleCNNConfig(
-                input_dims=observation_space.shape,
-                cnn_activation=model_config_dict.get("conv_activation", "relu"),
-                conv_layers=backbone_config.get("conv_layers"),
-                feature_size=backbone_config.get("feature_size", 256),
-                adaptive_pooling=backbone_config.get("adaptive_pooling", True),
-            )
+            # Check if IMPALA is specified in the config
+            backbone_type = backbone_config.get("type", "SimpleCNN")
+            
+            if backbone_type == "IMPALA":
+                return IMPALAConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                    num_res_blocks=backbone_config.get("num_res_blocks", 2),
+                )
+            elif backbone_type == "SimpleCNN":
+                return SimpleCNNConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                )
+            else:
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA'")
         else:
             return super()._get_encoder_config(
                 observation_space=observation_space,
@@ -163,13 +193,27 @@ class CustomSACCatalog(SACCatalog):
             from ray.rllib.core.models.configs import RecurrentEncoderConfig
             
             # Create CNN tokenizer config (without LSTM)
-            tokenizer_config = SimpleCNNConfig(
-                input_dims=observation_space.shape,
-                cnn_activation=model_config_dict.get("conv_activation", "relu"),
-                conv_layers=backbone_config.get("conv_layers"),
-                feature_size=backbone_config.get("feature_size", 256),
-                adaptive_pooling=backbone_config.get("adaptive_pooling", True),
-            )
+            backbone_type = backbone_config.get("type", "SimpleCNN")
+            
+            if backbone_type == "IMPALA":
+                tokenizer_config = IMPALAConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                    num_res_blocks=backbone_config.get("num_res_blocks", 2),
+                )
+            elif backbone_type == "SimpleCNN":
+                tokenizer_config = SimpleCNNConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                )
+            else:
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA'")
             
             # Wrap CNN with LSTM
             return RecurrentEncoderConfig(
@@ -186,13 +230,28 @@ class CustomSACCatalog(SACCatalog):
             )
         
         if isinstance(observation_space, Box) and len(observation_space.shape) == 3:
-            return SimpleCNNConfig(
-                input_dims=observation_space.shape,
-                cnn_activation=model_config_dict.get("conv_activation", "relu"),
-                conv_layers=backbone_config.get("conv_layers"),
-                feature_size=backbone_config.get("feature_size", 256),
-                adaptive_pooling=backbone_config.get("adaptive_pooling", True),
-            )
+            # Check if IMPALA is specified in the config
+            backbone_type = backbone_config.get("type", "SimpleCNN")
+            
+            if backbone_type == "IMPALA":
+                return IMPALAConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                    num_res_blocks=backbone_config.get("num_res_blocks", 2),
+                )
+            elif backbone_type == "SimpleCNN":
+                return SimpleCNNConfig(
+                    input_dims=observation_space.shape,
+                    cnn_activation=model_config_dict.get("conv_activation", "relu"),
+                    conv_layers=backbone_config.get("conv_layers"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    adaptive_pooling=backbone_config.get("adaptive_pooling", True),
+                )
+            else:
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA'")
         else:
             return super()._get_encoder_config(
                 observation_space=observation_space,

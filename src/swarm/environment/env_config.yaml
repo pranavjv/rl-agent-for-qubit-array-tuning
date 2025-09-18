@@ -10,6 +10,8 @@ simulator:
   num_dots: 4
 
   use_barriers: false
+
+  breadcrumb_reward_factor: 1. # Factor between 'terminal' and 'approach' rewards
   
 
   measurement:

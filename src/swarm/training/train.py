@@ -289,6 +289,7 @@ def main():
             "clip_actions": config['rl_config']['training']['clip_actions'],
             "target_network_update_freq": config['rl_config']['training']['target_network_update_freq'],
             "num_steps_sampled_before_learning_starts": config['rl_config']['training']['num_steps_sampled_before_learning_starts'],
+            "replay_buffer_config": config['rl_config']['training']['replay_buffer_config'],
         }
 
         if algo == "ppo":

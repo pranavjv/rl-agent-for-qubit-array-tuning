@@ -1,5 +1,5 @@
 from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import DefaultPPOTorchRLModule
-from ray.rllib.algorithms.sac.torch.default_sac_torch_rl_module import DefaultSACTorchRLModule
+from swarm.voltage_model.custom_sac_rl_module import CustomSACTorchRLModule
 
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec, RLModuleSpec
 
@@ -107,7 +107,7 @@ def create_rl_module_spec(env_instance, algo: str="ppo", config: dict=None) -> M
         module_class = DefaultPPOTorchRLModule
         catalog_class = CustomPPOCatalog
     elif algo=="sac":
-        module_class = DefaultSACTorchRLModule
+        module_class = CustomSACTorchRLModule
         catalog_class = CustomSACCatalog
     else:
         raise ValueError(f"Unsupported algorithm: {algo}")

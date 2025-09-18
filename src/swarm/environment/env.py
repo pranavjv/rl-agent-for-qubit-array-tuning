@@ -293,7 +293,8 @@ class QuantumDeviceEnv(gym.Env):
             self.barrier_voltage_max - self.barrier_voltage_min
         )  # always gives reward
 
-        gate_rewards = (1 - gate_distances / max_gate_distance) * 0.01
+        reward_factor = self.config['simulator']['breadcrumb_reward_factor']
+        gate_rewards = (1 - gate_distances / max_gate_distance) * reward_factor
         barrier_rewards = 1 - barrier_distances / max_barrier_distance
 
         # gate_rewards = gate_rewards - self.current_step * 0.1
@@ -301,7 +302,7 @@ class QuantumDeviceEnv(gym.Env):
 
         at_target = gate_distances <= self.tolerance
 
-        gate_rewards[at_target] += 1.0
+        gate_rewards[at_target] = 1.0
 
         rewards = {"gates": gate_rewards, "barriers": barrier_rewards}
 
