@@ -4,7 +4,7 @@ Clean metrics extraction and logging for Ray RLlib training.
 Provides professional console output and comprehensive wandb logging.
 """
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import psutil
@@ -12,6 +12,40 @@ import wandb
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
+
+
+# Global EMA state for sweep optimization
+_ema_state = {
+    'plunger_return_ema': None,
+    'ema_period': 20,
+    'ema_alpha': None
+}
+
+
+def initialize_ema(ema_period: int = 20):
+    """Initialize EMA tracking for sweep optimization."""
+    global _ema_state
+    _ema_state['ema_period'] = ema_period
+    _ema_state['ema_alpha'] = 2.0 / (ema_period + 1)
+    _ema_state['plunger_return_ema'] = None
+
+
+def update_ema(current_value: float) -> float:
+    """Update and return the EMA value."""
+    global _ema_state
+    
+    if _ema_state['ema_alpha'] is None:
+        initialize_ema()
+    
+    if _ema_state['plunger_return_ema'] is None:
+        _ema_state['plunger_return_ema'] = current_value
+    else:
+        _ema_state['plunger_return_ema'] = (
+            _ema_state['ema_alpha'] * current_value + 
+            (1 - _ema_state['ema_alpha']) * _ema_state['plunger_return_ema']
+        )
+    
+    return _ema_state['plunger_return_ema']
 
 
 def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -190,7 +224,13 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
     # Multi-agent returns
     if metrics["agent_returns"]:
         if "plunger_avg" in metrics["agent_returns"]:
-            log_dict["plunger_return_avg"] = metrics["agent_returns"]["plunger_avg"]
+            plunger_return = metrics["agent_returns"]["plunger_avg"]
+            log_dict["plunger_return_avg"] = plunger_return
+            
+            # Update and log EMA for sweep optimization
+            plunger_return_ema = update_ema(plunger_return)
+            log_dict["plunger_return_ema"] = plunger_return_ema
+            
         if "barrier_avg" in metrics["agent_returns"]:
             log_dict["barrier_return_avg"] = metrics["agent_returns"]["barrier_avg"]
 
@@ -313,18 +353,25 @@ def upload_checkpoint_artifact(checkpoint_path: str, iteration: int, reward: flo
         print(f"Failed to upload checkpoint artifact: {e}")
 
 
-def setup_wandb_metrics():
+def setup_wandb_metrics(ema_period: int = 20):
     """
     Setup wandb metric definitions for better visualization.
     Call this after wandb.init().
+    
+    Args:
+        ema_period: Period for EMA calculation (default: 20)
     """
     if not wandb.run:
         return
+    
+    # Initialize EMA with the specified period
+    initialize_ema(ema_period)
 
     # Define custom metrics for better tracking
     wandb.define_metric("iteration")
     wandb.define_metric("episode_return_mean", step_metric="iteration", summary="max")
     wandb.define_metric("plunger_return_avg", step_metric="iteration", summary="max")
+    wandb.define_metric("plunger_return_ema", step_metric="iteration", summary="max")
     wandb.define_metric("barrier_return_avg", step_metric="iteration", summary="max")
     wandb.define_metric("plunger_policy_loss", step_metric="iteration", summary="min")
     wandb.define_metric("barrier_policy_loss", step_metric="iteration", summary="min")

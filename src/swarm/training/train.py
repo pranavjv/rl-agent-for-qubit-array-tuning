@@ -53,49 +53,105 @@ from swarm.voltage_model import create_rl_module_spec
 
 
 def parse_config_overrides(unknown_args):
-    """Parse config override arguments in the format --key.subkey value (allows dynamically overriding settings when calling train.py)"""
+    """Parse config override arguments in the format --key.subkey value or --key=value (allows dynamically overriding settings when calling train.py)"""
     overrides = {}
     i = 0
     while i < len(unknown_args):
         arg = unknown_args[i]
-        if arg.startswith('--') and i + 1 < len(unknown_args):
-            key = arg[2:]  # Remove '--' prefix
-            value = unknown_args[i + 1]
+        if arg.startswith('--'):
+            # Handle both --key=value and --key value formats
+            if '=' in arg:
+                # Format: --key=value
+                key_value = arg[2:]  # Remove '--' prefix
+                key, value = key_value.split('=', 1)
+                i += 1
+            elif i + 1 < len(unknown_args) and not unknown_args[i + 1].startswith('--'):
+                # Format: --key value
+                key = arg[2:]  # Remove '--' prefix
+                value = unknown_args[i + 1]
+                i += 2
+            else:
+                # Standalone flag or no value
+                i += 1
+                continue
             
+            # Type conversion
             try:
-                # Try int first
-                if '.' not in value:
-                    try:
-                        value = int(value)
-                    except ValueError:
-                        # Try float
-                        try:
-                            value = float(value)
-                        except ValueError:
-                            # Try boolean
-                            if value.lower() in ('true', 'false'):
-                                value = value.lower() == 'true'
-                            # Otherwise keep as string
+                # Handle None as string
+                if value.lower() == 'none':
+                    value = None
+                elif value.lower() in ('true', 'false'):
+                    # Handle boolean
+                    value = value.lower() == 'true'
                 else:
-                    # Has decimal point, try float
+                    # Try to convert to number (handles both int, float, and scientific notation)
                     try:
-                        value = float(value)
+                        # First try float (handles scientific notation like 1e-05)
+                        float_val = float(value)
+                        # If it's a whole number, convert to int
+                        if float_val.is_integer() and 'e' not in value.lower() and '.' not in value:
+                            value = int(float_val)
+                        else:
+                            value = float_val
                     except ValueError:
                         # Keep as string if not a number
                         pass
-            except ValueError:
+            except (ValueError, AttributeError):
                 pass  # Keep as string
                 
             overrides[key] = value
-            i += 2
         else:
             i += 1
     return overrides
 
 
+def map_sweep_parameters(overrides):
+    """Map sweep parameter names to config paths for wandb sweep compatibility."""
+    # Mapping from sweep parameter names to config paths
+    sweep_param_mapping = {
+        # Core training parameters
+        'minibatch_size': 'rl_config.training.minibatch_size',
+        'num_epochs': 'rl_config.training.num_epochs',
+        'lr': 'rl_config.training.lr',
+        'gamma': 'rl_config.training.gamma',
+        'lambda_': 'rl_config.training.lambda_',
+        'clip_param': 'rl_config.training.clip_param',
+        'entropy_coeff': 'rl_config.training.entropy_coeff',
+        'vf_loss_coeff': 'rl_config.training.vf_loss_coeff',
+        'kl_target': 'rl_config.training.kl_target',
+        'grad_clip': 'rl_config.training.grad_clip',
+        'grad_clip_by': 'rl_config.training.grad_clip_by',
+        'train_batch_size': 'rl_config.training.train_batch_size',
+        
+        # Algorithm choice
+        'algorithm': 'rl_config.algorithm',
+        
+        # Training control
+        'num_iterations': 'defaults.num_iterations',
+    }
+    
+    mapped_overrides = {}
+    
+    for key, value in overrides.items():
+        if key in sweep_param_mapping:
+            # Map sweep parameter to config path
+            config_path = sweep_param_mapping[key]
+            mapped_overrides[config_path] = value
+            print(f"Mapped sweep parameter: {key} -> {config_path} = {value}")
+        else:
+            # Keep original key (might be a nested config path already)
+            mapped_overrides[key] = value
+            print(f"Direct config override: {key} = {value}")
+    
+    return mapped_overrides
+
+
 def apply_config_overrides(config, overrides):
     """Apply config overrides using dot notation to nested dictionary."""
-    for key, value in overrides.items():
+    # First map sweep parameters to config paths
+    mapped_overrides = map_sweep_parameters(overrides)
+    
+    for key, value in mapped_overrides.items():
         keys = key.split('.')
         current = config
         
@@ -107,7 +163,7 @@ def apply_config_overrides(config, overrides):
         
         # Set the final value
         current[keys[-1]] = value
-        print(f"Config override: {key} = {value}")
+        print(f"Config override applied: {key} = {value}")
     
     return config
 
@@ -183,7 +239,22 @@ def parse_arguments():
 
 
 def create_env(config=None):
-    """Create multi-agent quantum environment."""
+    """Create multi-agent quantum environment with JAX safety."""
+    import os
+    import jax
+    
+    # Ensure JAX settings are applied in worker processes
+    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+    os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.1")
+    os.environ.setdefault("JAX_ENABLE_X64", "true")
+    
+    # Try to clear any existing JAX state
+    try:
+        # Force JAX to use a fresh backend in each worker
+        jax.clear_backends()
+    except:
+        pass
+    
     from swarm.environment.multi_agent_wrapper import MultiAgentEnvWrapper
 
     # Wrap in multi-agent wrapper (config unused but required by RLlib)
@@ -222,7 +293,7 @@ def main():
         )
         # Log the final config (with command line overrides) to wandb
         wandb.config.update(config)
-        setup_wandb_metrics()
+        setup_wandb_metrics(config['wandb']['ema_period'])
 
     # Initialize Ray with runtime environment from config
     ray_config = {
@@ -423,7 +494,7 @@ def main():
             # Clean console output and wandb logging
             print_training_progress(result, i, training_start_time)
 
-            # Log metrics to wandb
+            # Log metrics to wandb (EMA is calculated automatically in metrics_logger)
             log_to_wandb(result, i)
 
             # Save checkpoint using modern RLlib API

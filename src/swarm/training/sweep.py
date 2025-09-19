@@ -22,7 +22,7 @@ from swarm.training.train import main as train_main
 
 
 # =============================================================================
-# SWEEP CONFIGURATION - MODIFY THESE VALUES TO CUSTOMIZE YOUR SWEEP
+# SWEEP CONFIGURATION - MODIFY THESE VALUES TO CUSTOMIZE THE SWEEP
 # =============================================================================
 """
 This section contains all configurable parameters for the hyperparameter sweep.
@@ -41,54 +41,38 @@ Examples of parameter modifications:
 The sweep will automatically include only parameters with multiple values.
 """
 
+# train_batch_size: [8192, 16384, 32768, 65536]
+# sgd_minibatch_size: [1024, 2048, 4096]
+# lr: [1e-5, 3e-5, 1e-4, 3e-4, 1e-3]
+
 SWEEP_PARAMETERS = {
     # Core training hyperparameters from rl_config.training
-    'train_batch_size': [2048, 4096, 8192, 16384],
-    'minibatch_size': [64, 128, 256, 512],
-    'lr': [1e-5, 3e-4, 1e-3, 3e-3],
-    'gamma': [0.95, 0.99, 0.995, 0.999],
-    'lambda_': [0.9, 0.95, 0.98, 1.0],
+    'minibatch_size': [64, 256],
+    'num_epochs': [1, 2, 5],
+    'lr': [1e-5, 3e-4, 1e-3],
+
+    # 'gamma': [0.95, 0.99, 0.995, 0.999],
+    # 'lambda_': [0.9, 0.95, 0.98, 1.0],
+
     'clip_param': [0.1, 0.2, 0.3, 0.4],
     'entropy_coeff': [0.0, 0.001, 0.01, 0.05, 0.1],
     'vf_loss_coeff': [0.25, 0.5, 1.0, 2.0],
+
     'kl_target': [0.005, 0.01, 0.02, 0.05],
-    'num_epochs': [1, 2, 3, 5, 10],
-    'grad_clip': [5.0, 10.0, 20.0, 40.0, None],
-    'grad_clip_by': ['norm', 'value'],
-    
-    # Environment runner parameters
-    'num_env_runners': [2, 4, 6, 8],
-    'rollout_fragment_length': [25, 50, 100, 200],
-    'sample_timeout_s': [600.0, 1200.0, 1800.0],
-    'num_gpus_per_env_runner': [0.3, 0.5, 0.6, 0.8],
-    
-    # Learner parameters
-    'num_learners': [1, 2],
-    'num_gpus_per_learner': [0.5, 0.75, 1.0],
-    
-    # Multi-agent parameters
-    'free_log_std': [True, False],
-    'log_std_bounds': [[-20, 2], [-15, 2], [-10, 2], [-5, 2]],
-    
-    # Neural network architecture parameters
-    'plunger_feature_size': [128, 256, 512, 1024],
-    'plunger_lstm_cell_size': [256, 512, 1024],
-    'plunger_lstm_max_seq_len': [25, 50, 100],
-    'plunger_policy_hidden_layers': [[256, 128], [512, 256], [512, 256, 128]],
-    'plunger_value_hidden_layers': [[256, 128], [512, 256], [512, 256, 128]],
-    
-    'barrier_feature_size': [64, 128, 256],
-    'barrier_policy_hidden_layers': [[16, 16], [32, 32], [64, 32]],
-    'barrier_value_hidden_layers': [[16, 16], [32, 32], [64, 32]],
+    'grad_clip': [5.0, 10.0, 20.0, None],
+    'grad_clip_by': ['norm'],
     
     # Algorithm choice
-    'algorithm': ['PPO', 'SAC'],
+    'algorithm': ['PPO'],
+    
+    # Control training duration for sweeps
+    'num_iterations': [50],  # Shorter runs for hyperparameter search
 }
 
 # Sweep method configuration
-SWEEP_METHOD = 'random'  # Options: 'random', 'grid', 'bayes'
+SWEEP_METHOD = 'bayes'  # Options: 'random', 'grid', 'bayes'
 SWEEP_METRIC = {
-    'name': 'episode_return_mean',
+    'name': 'plunger_return_ema',
     'goal': 'maximize'
 }
 
@@ -106,7 +90,14 @@ def create_sweep_config() -> Dict[str, Any]:
     sweep_config = {
         'method': SWEEP_METHOD,
         'metric': SWEEP_METRIC,
-        'parameters': {}
+        'parameters': {},
+        'program': 'train.py',  # Specify the training script
+        'command': [
+            '${env}',
+            'python3',
+            '${program}',
+            '${args}'
+        ]
     }
     
     # Add early termination for bayes method
