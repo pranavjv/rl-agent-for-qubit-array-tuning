@@ -72,7 +72,7 @@ SWEEP_PARAMETERS = {
 # Sweep method configuration
 SWEEP_METHOD = 'bayes'  # Options: 'random', 'grid', 'bayes'
 SWEEP_METRIC = {
-    'name': 'plunger_return_ema',
+    'name': 'plunger_return_avg',
     'goal': 'maximize'
 }
 

@@ -261,6 +261,21 @@ def create_env(config=None):
     return MultiAgentEnvWrapper()
 
 
+def create_env_to_module_connector(env, spaces, device, use_deltas):
+    """
+    Creates module connector for action to memory handling.
+    Note: do not modify the signature, ray expects these arguments
+    """
+    from swarm.voltage_model.prev_action_handling import CustomPrevActionHandling
+
+    # Only add custom connector when needed, let Ray handle defaults
+    if use_deltas:
+        return [CustomPrevActionHandling()]
+    else:
+        # Return empty list - let Ray handle everything with defaults
+        return []
+
+
 def load_config():
     """Load training configuration from YAML file."""
     config_path = Path(__file__).parent / "training_config.yaml"
@@ -372,6 +387,11 @@ def main():
         else:
             raise ValueError(f"Unsupported algorithm: {algo}")
 
+        # Handle action parsing to memory manually
+        use_deltas = env_instance.base_env.use_deltas
+        print(f"Using deltas: {use_deltas}")
+        env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
+
         algo_config = (
             algo_config_builder()
             .environment(
@@ -391,6 +411,8 @@ def main():
                 rollout_fragment_length=config['rl_config']['env_runners']['rollout_fragment_length'],
                 sample_timeout_s=config['rl_config']['env_runners']['sample_timeout_s'],
                 num_gpus_per_env_runner=config['rl_config']['env_runners']['num_gpus_per_env_runner'],
+                env_to_module_connector=env_to_module_connector,
+                add_default_connectors_to_env_to_module_pipeline=True,  # Let Ray handle defaults
             )
             .learners(
                 num_learners=config['rl_config']['learners']['num_learners'], 

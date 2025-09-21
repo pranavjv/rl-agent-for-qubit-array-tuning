@@ -11,8 +11,10 @@ simulator:
 
   use_barriers: false
 
+  use_deltas: false # Whether the plunger agents' output is a ΔV or V
+
   breadcrumb_reward_factor: 1. # Factor between 'terminal' and 'approach' rewards
-  # log distance to temrination separately
+  # log distance to termination separately
   
 
   measurement:
@@ -25,10 +27,12 @@ simulator:
     # resolution for simulator images
     resolution: 100
 
-    # domain randomisation parameters
+    # domain randomisation parameters (only for gate voltages)
     random_window_size: {"min": 0.5, "max": 1.5}
     random_action_scaling: {"min": 0.8, "max": 1.2}
-    random_action_offset: {"min": -0.2, "max": 0.2}
+    random_action_offset: {"min": 0.0, "max": 0.0} # set to zero for now, since with center offset this is redundant
+    random_center_offset: {"min": -5.0, "max": 5.0} # applied consistently to all voltages
+
 
 capacitance_model:
   update_method: "fake"  # Options: null (does not update vgm), "fake" (for testing/debugging), "bayesian" (simple prior), "kriging" (history based spatial prior)

@@ -44,6 +44,7 @@ class QuantumDeviceEnv(gym.Env):
         self.training = training  # if we are training or not
         self.num_dots = self.config['simulator']['num_dots']
         self.use_barriers = self.config['simulator']['use_barriers']
+        self.use_deltas = self.config['simulator']['use_deltas']
 
         # obs voltage min/max define the range over which we sweep the 2d csd pairs
         self.obs_voltage_min = self.config["simulator"]["measurement"]["gate_voltage_sweep_range"][
@@ -99,6 +100,9 @@ class QuantumDeviceEnv(gym.Env):
         self.obs_channels = self.num_dots - 1
         self.obs_normalization_range = [0.0, 1.0]
 
+        random_center_offset_min = self.config["simulator"]["measurement"]["random_center_offset"]["min"]
+        random_center_offset_max = self.config["simulator"]["measurement"]["random_center_offset"]["max"]
+
         self.observation_space = spaces.Dict(
             {
                 "image": spaces.Box(
@@ -108,8 +112,8 @@ class QuantumDeviceEnv(gym.Env):
                     dtype=np.float32,
                 ),
                 "obs_gate_voltages": spaces.Box(
-                    low=self.gate_voltage_min,
-                    high=self.gate_voltage_max,
+                    low=self.gate_voltage_min + random_center_offset_min,
+                    high=self.gate_voltage_max + random_center_offset_max,
                     shape=(self.num_plunger_voltages,),
                     dtype=np.float32,
                 ),
@@ -191,6 +195,8 @@ class QuantumDeviceEnv(gym.Env):
 
         self._update_virtual_gate_matrix(observation)
 
+        observation["obs_gate_voltages"] += self.random_center_offset
+
         info = self._get_info()
 
         return observation, info
@@ -224,9 +230,16 @@ class QuantumDeviceEnv(gym.Env):
         gate_voltages = np.array(gate_voltages).flatten().astype(np.float32)
         barrier_voltages = np.array(barrier_voltages).flatten().astype(np.float32)
 
+        # Remove the random center offset before applying the action
+        if not self.use_deltas:
+            gate_voltages -= self.random_center_offset
+
         # apply random transformation (if we are training)
         if self.training:
             gate_voltages = self.action_scale_factor * gate_voltages + self.action_offset
+
+        if self.use_deltas:
+            gate_voltages += self.device_state["current_gate_voltages"]
 
         self.device_state["current_gate_voltages"] = gate_voltages
         self.device_state["current_barrier_voltages"] = barrier_voltages
@@ -251,6 +264,9 @@ class QuantumDeviceEnv(gym.Env):
         self.device_state["virtual_gate_matrix"] = (
             self.array.model.gate_voltage_composer.virtual_gate_matrix
         )
+
+        # Apply absolute voltage scale randomisation
+        observation["obs_gate_voltages"] += self.random_center_offset
 
         info = self._get_info()
 
@@ -309,7 +325,9 @@ class QuantumDeviceEnv(gym.Env):
         return rewards, at_target
 
     def _get_info(self):
-        return {}
+        return {
+            "current_device_state": self.device_state
+        }
 
     def _normalise_obs(self, obs):
         """
@@ -449,11 +467,16 @@ class QuantumDeviceEnv(gym.Env):
             self.obs_voltage_min = self.obs_voltage_min*self.window_size
        
             self.obs_voltage_max = self.obs_voltage_max*self.window_size
+
+            random_center_offset_min = self.config["simulator"]["measurement"]["random_center_offset"]["min"]
+            random_center_offset_max = self.config["simulator"]["measurement"]["random_center_offset"]["max"]
+            self.random_center_offset = np.random.uniform(random_center_offset_min, random_center_offset_max, self.num_plunger_voltages)
             
         else:
             # No scaling during inference
             self.action_scale_factor = np.ones(self.num_plunger_voltages, dtype=np.float32)
             self.action_offset = np.zeros(self.num_plunger_voltages, dtype=np.float32)
+            self.random_center_offset = np.zeros(self.num_plunger_voltages)
 
     def _init_capacitance_model(self):
         """

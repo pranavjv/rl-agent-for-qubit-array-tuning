@@ -33,6 +33,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
     - A single voltage value (gate or barrier)
 
     The wrapper combines individual agent actions into global environment actions.
+
+    Internally converts between voltage delta outputs and voltages to be applied to the device (or simulator)
     """
 
     def __init__(
@@ -341,8 +343,32 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         agent_truncated["__all__"] = truncated  # Required by MultiAgentEnv
 
         # Create per-agent info dict (MultiAgentEnv requirement)
-        agent_infos = dict.fromkeys(self.all_agent_ids, info)
+        device_state_info = info.get("current_device_state", None)
 
+        if not device_state_info:
+            agent_infos = dict.fromkeys(self.all_agent_ids, {})
+        else:
+            try:
+                agent_infos = {}
+                plunger_ids = [f"plunger_{i}" for i in range(self.num_gates)]
+                barrier_ids = [f"barrier_{i}" for i in range(self.num_barriers)]
+
+                for idx, agent_id in enumerate(plunger_ids):
+                    agent_infos[agent_id] = {
+                        "ground_truth": device_state_info["gate_ground_truth"][idx],
+                        "current_voltage": device_state_info["current_gate_voltages"][idx],
+                    }
+                
+                for idx, agent_id in enumerate(barrier_ids):
+                    agent_infos[agent_id] = {
+                        "ground_truth": device_state_info["barrier_ground_truth"][idx],
+                        "current_voltage": device_state_info["current_barrier_voltages"][idx],
+                    }
+            except Exception as e:
+                agent_infos = dict.fromkeys(self.all_agent_ids, {
+                    "error": f"Error creating multi-agent info: {e}"
+                })
+                
         return (
             agent_observations,
             agent_rewards,
@@ -366,7 +392,7 @@ if __name__ == "__main__":
 
     try:
         # Create wrapper (no need for separate base_env)
-        wrapper = MultiAgentEnvWrapper(num_dots=4, training=True)  # Small test
+        wrapper = MultiAgentEnvWrapper(training=True)  # Small test
         print("✓ Created multi-agent wrapper")
 
         print(f"Agent IDs: {wrapper.get_agent_ids()}")

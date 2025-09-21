@@ -37,7 +37,6 @@ def create_rl_module_spec(env_instance, algo: str="ppo", config: dict=None) -> M
     barrier_high = full_action_space["action_barrier_voltages"].high[0]
 
     # Create observation space for gate agents
-
     gate_obs_space = spaces.Box(
         low=0.0,
         high=1.0,
