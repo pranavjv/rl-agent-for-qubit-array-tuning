@@ -40,7 +40,7 @@ ray:
 ppo:
   # Environment runners configuration
   env_runners:
-    num_env_runners: 4              # Number of parallel environment runners
+    num_env_runners: 8              # Number of parallel environment runners
     rollout_fragment_length: 50     # Steps per rollout fragment
     sample_timeout_s: 1200.0         # Timeout for sampling
     num_gpus_per_env_runner: 0.6    # GPU allocation per runner
