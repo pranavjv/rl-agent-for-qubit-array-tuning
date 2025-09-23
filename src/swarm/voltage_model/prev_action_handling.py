@@ -7,6 +7,7 @@ from ray.rllib.utils.annotations import override
 from ray.rllib.utils.typing import EpisodeType
 from ray.rllib.core.rl_module.rl_module import RLModule
 from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
+from ray.rllib.policy.sample_batch import SampleBatch
 
 from typing import Optional, Dict, Any, List
 import gymnasium as gym
@@ -40,37 +41,22 @@ class CustomPrevActionHandling(ConnectorV2):
             for sa_episode in self.single_agent_episode_iterator(
                 episodes, agents_that_stepped_only=True
             ):
-                # Episode is not numpy'ized yet and thus still operates on lists of items.
-                assert not sa_episode.is_numpy
 
                 # Get current observation
                 current_obs = sa_episode.get_observations(-1)
+                obs_gate_voltages = current_obs["obs_gate_voltages"]
+                # raises an error, current_obs is now an array -> either use whole dict, or keep history as an attribute somehow
                 
-                # Extract previous gate voltages from environment observations
-                # Look back one step to get previous voltages
-                if len(sa_episode) >= 2:
-                    prev_obs = sa_episode.get_observations(-2)
+                last_action = sa_episode.get_actions(-1)
                     
-                    # Extract "obs_gate_voltages" from previous observation
-                    if isinstance(prev_obs, dict) and "obs_gate_voltages" in prev_obs:
-                        prev_gate_voltages = prev_obs["obs_gate_voltages"]
-                    else:
-                        # If obs_gate_voltages not found, fill with zeros
-                        prev_gate_voltages = np.zeros((1,))  # Adjust shape as needed
-                else:
-                    # For first step, use zeros
-                    prev_gate_voltages = np.zeros((1,))  # Adjust shape as needed
-
-                # Get the most recent action (delta)
-                if len(sa_episode) >= 1:
-                    last_action = sa_episode.get_actions(-1)
-                    
-                    # Convert delta action to absolute action by adding previous voltages
-                    if isinstance(last_action, (list, tuple, np.ndarray)):
-                        absolute_action = np.array(last_action) + prev_gate_voltages
+                absolute_action = np.array(last_action) + obs_gate_voltages
                         
-                        # Update the action in the episode
-                        sa_episode.set_actions(at_indices=-1, new_data=absolute_action)
+                self.add_batch_item(
+                    batch,
+                    SampleBatch.PREV_ACTIONS,
+                    item_to_add=absolute_action,
+                    single_agent_episode=sa_episode,
+                )
 
             return batch
             

@@ -7,9 +7,10 @@ and handles the conversion between single-agent actions and global environment a
 
 import os
 import sys
-from typing import Dict
+from typing import Dict, Union
 
 import numpy as np
+import torch
 from gymnasium import spaces
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
@@ -376,6 +377,20 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             agent_truncated,
             agent_infos,
         )
+
+    def _get_obs_images(self, obs: Dict[str, Union[np.ndarray, torch.tensor]]):
+        barrier_keys = [k for k in obs.keys() if k.lower().startswith('barrier')]
+        assert len(barrier_keys) == len(self.barrier_agent_ids), "Mismatch between barrier agents and provided observation"
+        channels = []
+        for agent_id in self.barrier_agent_ids:
+            agent_obs = obs[agent_id]
+            if isinstance(agent_obs, torch.Tensor):
+                agent_obs = agent_obs.numpy()
+            channels.append(agent_obs)
+
+        channels = np.stack(channels, axis=-1)
+        channels = np.squeeze(channels)
+        return channels
 
     def close(self):
         """Close the base environment."""

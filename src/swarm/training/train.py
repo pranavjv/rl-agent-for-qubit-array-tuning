@@ -205,6 +205,8 @@ def find_latest_checkpoint(checkpoint_dir):
     return latest_checkpoint, max_iteration
 
 
+
+
 def parse_arguments():
     """Parse command line arguments for checkpoint loading and config overrides."""
     parser = argparse.ArgumentParser(description='Multi-agent RL training for quantum device tuning')
@@ -265,11 +267,15 @@ def create_env_to_module_connector(env, spaces, device, use_deltas):
     """
     Creates module connector for action to memory handling.
     Note: do not modify the signature, ray expects these arguments
+    
+    Args:
+        env: The (vectorized) gym environment
+        spaces: Dict with space info like {'__env__': ([obs_space, act_space]), '__env_single__': ([obs_space, act_space])}
+        device: Torch device (can be None)
+        use_deltas: Whether to use delta actions (from partial)
     """
-    from swarm.voltage_model.prev_action_handling import CustomPrevActionHandling
-
-    # Only add custom connector when needed, let Ray handle defaults
     if use_deltas:
+        from swarm.voltage_model.prev_action_handling import CustomPrevActionHandling
         return [CustomPrevActionHandling()]
     else:
         # Return empty list - let Ray handle everything with defaults
@@ -309,6 +315,12 @@ def main():
         # Log the final config (with command line overrides) to wandb
         wandb.config.update(config)
         setup_wandb_metrics(config['wandb']['ema_period'])
+        
+        # Log the training config as an artifact
+        config_artifact = wandb.Artifact("training_config", type="config", metadata=config)
+        config_path = Path(__file__).parent / "training_config.yaml"
+        config_artifact.add_file(str(config_path), "training_config.yaml")
+        wandb.log_artifact(config_artifact)
 
     # Initialize Ray with runtime environment from config
     ray_config = {
@@ -331,6 +343,11 @@ def main():
     try:
         register_env("qarray_multiagent_env", create_env)
         env_instance = create_env()
+
+        # Log environment config to wandb
+        if use_wandb:
+            env_config = env_instance.base_env.config
+            wandb.config.update({"env_config": env_config})
 
         # Optionally update the rl module config to allow log_std clamping, shared log_std vector etc.
         rl_module_config = {
@@ -388,9 +405,8 @@ def main():
             raise ValueError(f"Unsupported algorithm: {algo}")
 
         # Handle action parsing to memory manually
-        use_deltas = env_instance.base_env.use_deltas
-        print(f"Using deltas: {use_deltas}")
-        env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
+        # use_deltas = env_instance.base_env.use_deltas
+        # env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
 
         algo_config = (
             algo_config_builder()
@@ -411,8 +427,8 @@ def main():
                 rollout_fragment_length=config['rl_config']['env_runners']['rollout_fragment_length'],
                 sample_timeout_s=config['rl_config']['env_runners']['sample_timeout_s'],
                 num_gpus_per_env_runner=config['rl_config']['env_runners']['num_gpus_per_env_runner'],
-                env_to_module_connector=env_to_module_connector,
-                add_default_connectors_to_env_to_module_pipeline=True,  # Let Ray handle defaults
+                # env_to_module_connector=env_to_module_connector,
+                # add_default_connectors_to_env_to_module_pipeline=True,  # Let Ray handle defaults
             )
             .learners(
                 num_learners=config['rl_config']['learners']['num_learners'], 
@@ -434,6 +450,7 @@ def main():
         print(f"\nBuilding {algo} algorithm...\n")
 
         algo = algo_config.build()
+
 
         # Clean up the environment instance used for spec creation
         env_instance.close()
@@ -502,6 +519,14 @@ def main():
         config_save_path = checkpoint_base_dir / "training_config.yaml"
         with open(config_save_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        
+        # Also save environment config to checkpoint directory for inference
+        env_config_src = Path(__file__).parent.parent / "environment" / "env_config.yaml"
+        if env_config_src.exists():
+            env_config_dst = checkpoint_base_dir / "env_config.yaml"
+            import shutil
+            shutil.copy2(env_config_src, env_config_dst)
+            print(f"Environment config saved to: {env_config_dst}")
 
         remaining_iterations = config['defaults']['num_iterations'] - start_iteration
         print(f"\nStarting training for {remaining_iterations} iterations (from iteration {start_iteration + 1} to {config['defaults']['num_iterations']})...\n")

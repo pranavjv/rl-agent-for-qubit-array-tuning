@@ -2,6 +2,7 @@
 
 import sys
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 from pathlib import Path
 from PIL import Image
@@ -58,7 +59,7 @@ def create_gif_from_frames(frame_paths, output_path, duration=500):
         frame_path.unlink()
 
 
-def run_inference_episode(algo, max_steps=100):
+def run_inference_episode(algo, max_steps=100, deterministic=True):
     """
     Run a single inference episode and collect scan data for each channel.
     
@@ -74,32 +75,43 @@ def run_inference_episode(algo, max_steps=100):
     
     try:
         obs, info = env.reset()
-        scan_history.append(obs['image'])
+        obs_images = env._get_obs_images(obs)
+        print(obs_images.shape)
+        scan_history.append(obs_images)
         
         for step in range(max_steps):
-            # Compute actions for all agents
-            if isinstance(obs, dict) and any(agent_id in obs for agent_id in env.all_agent_ids):
-                # Multi-agent case
-                actions = {}
-                for agent_id, agent_obs in obs.items():
-                    if agent_id in env.all_agent_ids:
-                        policy_id = f"{agent_id.split('_')[0]}_policy"
-                        action = algo.compute_single_action(agent_obs, policy_id=policy_id)
-                        actions[agent_id] = action
-            else:
-                # Single agent case
-                actions = algo.compute_single_action(obs)
+            # Compute actions for all agents using new RLModule API
+            actions = {}
+            for agent_id, agent_obs in obs.items():
+                if agent_id in env.all_agent_ids:
+                    policy_id = f"{agent_id.split('_')[0]}_policy"
+                    
+                    # Get RLModule and compute action
+                    rl_module = algo.get_module(policy_id)
+                    obs_tensor = torch.from_numpy(agent_obs).unsqueeze(0).float()
+                    result = rl_module.forward_inference({"obs": obs_tensor})
+                    
+                    # Extract continuous action from distribution inputs
+                    action_dist_inputs = result["action_dist_inputs"][0]
+                    action_dim = action_dist_inputs.shape[0] // 2
+                    mean = action_dist_inputs[:action_dim]
+                    log_std = action_dist_inputs[action_dim:]
+
+                    if deterministic:
+                        action = mean
+                    else:
+                        std = torch.exp(log_std)
+                        action = torch.normal(mean, std)
+
+                    action = torch.clamp(action, -1.0, 1.0)
+                    actions[agent_id] = action.item()
             
             # Take step in environment
             obs, reward, terminated, truncated, info = env.step(actions)
             
-            # Store scan data (image observations)
-            if isinstance(obs, dict):
-                # For multi-agent, get base environment observation
-                base_obs = env.base_env.get_observation()
-                scan_history.append(base_obs['image'])
-            else:
-                scan_history.append(obs['image'])
+            assert isinstance(obs, dict)
+            obs_images = env._get_obs_images(obs)
+            scan_history.append(obs_images)
             
             # Check if episode is done
             if terminated or truncated:

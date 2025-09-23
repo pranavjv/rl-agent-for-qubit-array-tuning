@@ -176,7 +176,6 @@ class PolicyHead(TorchModel):
         
         return self.mlp(inputs)
 
-
 @dataclass
 class IMPALAConfig(CNNEncoderConfig):
     """IMPALA CNN configuration with ResNet blocks for quantum charge stability diagrams."""
@@ -368,3 +367,104 @@ class ValueHead(TorchModel):
             inputs = attended.squeeze(1)
         
         return self.mlp(inputs)
+
+
+if __name__ == "__main__":
+    """Print parameter counts for all network configurations."""
+    import yaml
+    from pathlib import Path
+    
+    def count_parameters(model):
+        """Count trainable parameters in a PyTorch model."""
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    # Load training config
+    config_path = Path(__file__).parent.parent / "training" / "training_config.yaml"
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        neural_configs = config.get('neural_networks', {})
+        
+        print("\n" + "="*60)
+        print("NETWORK PARAMETER COUNTS FROM CONFIGURATION")
+        print("="*60)
+        
+        total_params = 0
+        
+        for policy_name, policy_config in neural_configs.items():
+            print(f"\n{policy_name.upper()}:")
+            policy_total = 0
+            
+            # Create backbone
+            backbone_config = policy_config.get('backbone', {})
+            backbone_type = backbone_config.get('type', 'SimpleCNN')
+            
+            # Typical input dimensions for charge stability diagrams
+            input_dims = (64, 64, 1)  # height, width, channels
+            
+            if backbone_type == 'SimpleCNN':
+                config_obj = SimpleCNNConfig(
+                    input_dims=input_dims,
+                    conv_layers=backbone_config.get('conv_layers'),
+                    feature_size=backbone_config.get('feature_size', 256),
+                    adaptive_pooling=backbone_config.get('adaptive_pooling', True),
+                    cnn_activation="relu"
+                )
+                backbone = config_obj.build()
+                
+            elif backbone_type == 'IMPALA':
+                config_obj = IMPALAConfig(
+                    input_dims=input_dims,
+                    conv_layers=backbone_config.get('conv_layers'),
+                    feature_size=backbone_config.get('feature_size', 256),
+                    adaptive_pooling=backbone_config.get('adaptive_pooling', True),
+                    num_res_blocks=backbone_config.get('num_res_blocks', 2),
+                    cnn_activation="relu"
+                )
+                backbone = config_obj.build()
+            else:
+                print(f"  Unknown backbone type: {backbone_type}")
+                continue
+            
+            backbone_params = count_parameters(backbone)
+            print(f"  Backbone ({backbone_type}): {backbone_params:,} parameters")
+            policy_total += backbone_params
+            
+            # Create policy head
+            policy_head_config = policy_config.get('policy_head', {})
+            policy_head_obj = PolicyHeadConfig(
+                input_dims=(backbone_config.get('feature_size', 256),),
+                output_layer_dim=2,  # mean + log_std for continuous actions
+                hidden_layers=policy_head_config.get('hidden_layers', [128, 128]),
+                activation=policy_head_config.get('activation', 'relu'),
+                use_attention=policy_head_config.get('use_attention', False)
+            )
+            policy_head = policy_head_obj.build()
+            policy_head_params = count_parameters(policy_head)
+            print(f"  Policy Head: {policy_head_params:,} parameters")
+            policy_total += policy_head_params
+            
+            # Create value head
+            value_head_config = policy_config.get('value_head', {})
+            value_head_obj = ValueHeadConfig(
+                input_dims=(backbone_config.get('feature_size', 256),),
+                hidden_layers=value_head_config.get('hidden_layers', [128, 64]),
+                activation=value_head_config.get('activation', 'relu'),
+                use_attention=value_head_config.get('use_attention', False)
+            )
+            value_head = value_head_obj.build()
+            value_head_params = count_parameters(value_head)
+            print(f"  Value Head: {value_head_params:,} parameters")
+            policy_total += value_head_params
+            
+            print(f"  {policy_name} Total: {policy_total:,} parameters")
+            total_params += policy_total
+        
+        print(f"\nGRAND TOTAL: {total_params:,} parameters")
+        print("="*60)
+        
+    except Exception as e:
+        print(f"Error calculating parameter counts: {e}")
+        print("Make sure training_config.yaml exists and is properly formatted.")
