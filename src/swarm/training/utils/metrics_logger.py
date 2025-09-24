@@ -104,6 +104,7 @@ def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
     metrics["plunger_metrics"] = {
         "policy_loss": plunger_policy.get("policy_loss", None),
         "vf_loss": plunger_policy.get("vf_loss", None),
+        "vf_explained_var": plunger_policy.get("vf_explained_var", None),
         "entropy": plunger_policy.get("entropy", None),
         "mean_kl": plunger_policy.get("mean_kl_loss", None),
         "advantage_mean": plunger_policy.get("advantage_mean", None),
@@ -113,6 +114,7 @@ def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
     metrics["barrier_metrics"] = {
         "policy_loss": barrier_policy.get("policy_loss", None),
         "vf_loss": barrier_policy.get("vf_loss", None),
+        "vf_explained_var": barrier_policy.get("vf_explained_var", None),
         "entropy": barrier_policy.get("entropy", None),
         "mean_kl": barrier_policy.get("mean_kl_loss", None),
         "advantage_mean": barrier_policy.get("advantage_mean", None),
@@ -241,6 +243,7 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
             {
                 "plunger_policy_loss": p_metrics["policy_loss"],
                 "plunger_vf_loss": p_metrics["vf_loss"],
+                "plunger_vf_explained_var": p_metrics["vf_explained_var"],
                 "plunger_entropy": p_metrics["entropy"],
                 "plunger_mean_kl": p_metrics["mean_kl"],
             }
@@ -262,6 +265,7 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
             {
                 "barrier_policy_loss": b_metrics["policy_loss"],
                 "barrier_vf_loss": b_metrics["vf_loss"],
+                "barrier_vf_explained_var": b_metrics["vf_explained_var"],
                 "barrier_entropy": b_metrics["entropy"],
                 "barrier_mean_kl": b_metrics["mean_kl"],
             }
