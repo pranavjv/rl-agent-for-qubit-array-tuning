@@ -7,7 +7,7 @@ qarray
 torch
 torchvision
 ray[rllib]
-wandb
+wandb[media]
 gymnasium
 
 # Development tools

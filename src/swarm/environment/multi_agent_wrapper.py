@@ -51,6 +51,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         """
         super().__init__()
 
+        self._init_gif_capture()
+
         self.base_env = QuantumDeviceEnv(training=training)
 
         self.num_gates = self.base_env.num_dots
@@ -209,6 +211,11 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             # agent_idx = int(agent_id.split("_")[1])
             # voltage = global_obs["obs_barrier_voltages"][agent_idx : agent_idx + 1]
             pass
+
+        # GIF CAPTURE: Save images for target agent
+        if (hasattr(self, 'should_capture_gifs') and self.should_capture_gifs and
+            agent_id == self._get_target_agent_id()):
+            self._save_agent_image(agent_image, agent_id)
 
         # return {
         #     'image': agent_image.astype(np.float32),
@@ -391,6 +398,126 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         channels = np.stack(channels, axis=-1)
         channels = np.squeeze(channels)
         return channels
+
+    def _init_gif_capture(self):
+        """Initialize GIF capture system if this worker is selected."""
+        import os
+
+        # GIF capture state
+        self.should_capture_gifs = False
+        self.gif_config = None
+        self.gif_step_count = 0
+
+        # Check if we're the selected worker for GIF capture
+        if self._is_first_env_runner():
+            # Load gif capture config from environment variables (set by Ray runtime_env)
+            self.gif_config = {
+                "enabled": os.getenv("GIF_CAPTURE_ENABLED", "false").lower() == "true",
+                "target_agent_type": os.getenv("GIF_CAPTURE_AGENT_TYPE", "plunger"),
+                "target_agent_index": int(os.getenv("GIF_CAPTURE_AGENT_INDEX", "1")),
+                "save_dir": os.getenv("GIF_CAPTURE_SAVE_DIR", "./gif_captures")
+            }
+
+            if self.gif_config["enabled"]:
+                self.should_capture_gifs = True
+                self._setup_gif_directories()
+                print(f"[PID {os.getpid()}] Selected as GIF capture worker - targeting {self.gif_config['target_agent_type']}_{self.gif_config['target_agent_index']}")
+                print(f"[PID {os.getpid()}] Will save images to: {os.path.abspath(self.gif_config['save_dir'])}")
+                print(f"[PID {os.getpid()}] Current working directory: {os.getcwd()}")
+            else:
+                print(f"[PID {os.getpid()}] GIF capture disabled in config")
+        else:
+            print(f"[PID {os.getpid()}] Not selected for GIF capture")
+
+    def _is_first_env_runner(self):
+        """Check if this is the first env runner using atomic file creation."""
+        if not self._is_env_runner_worker():
+            return False
+
+        import os
+
+        lock_file = "/tmp/gif_capture_worker.lock"
+
+        try:
+            # Atomic file creation - only succeeds for first worker
+            lock_fd = os.open(lock_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+
+            # Write our PID to the lock file
+            with os.fdopen(lock_fd, 'w') as f:
+                f.write(str(os.getpid()))
+                f.flush()
+
+            return True
+
+        except OSError:
+            # File already exists - another worker got there first
+            return False
+
+    def _is_env_runner_worker(self):
+        """Check if this process is an env runner worker (not the driver)."""
+        try:
+            import ray
+            ctx = ray.get_runtime_context()
+            actor_id = ctx.get_actor_id()
+            # Driver has actor_id = None, workers have actual actor IDs
+            return actor_id is not None
+        except:
+            return False
+
+    def _setup_gif_directories(self):
+        """Set up directories for GIF capture."""
+        from pathlib import Path
+
+        base_dir = Path(self.gif_config["save_dir"])
+        base_dir.mkdir(parents=True, exist_ok=True)
+        print(f"GIF capture directory ready: {base_dir}")
+
+    def _get_target_agent_id(self):
+        """Get the agent ID we're targeting for GIF capture."""
+        agent_type = self.gif_config["target_agent_type"]
+        agent_index = self.gif_config["target_agent_index"]
+        return f"{agent_type}_{agent_index}"
+
+    def _save_agent_image(self, agent_image, agent_id):
+        """Save agent image(s) to disk for GIF creation."""
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+
+        # Create step directory
+        save_dir = Path(self.gif_config["save_dir"])
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save each channel as a separate image
+        if agent_image.shape[2] == 2:
+            # Plunger agent: 2 channels
+            for channel in range(2):
+                channel_data = agent_image[:, :, channel]
+                # Normalize to 0-255 for PNG
+                channel_data_uint8 = ((channel_data - channel_data.min()) /
+                                     (channel_data.max() - channel_data.min() + 1e-8) * 255).astype(np.uint8)
+
+                img = Image.fromarray(channel_data_uint8, mode='L')
+                filename = save_dir / f"step_{self.gif_step_count:06d}_channel_{channel}.png"
+                img.save(filename)
+
+        else:
+            # Barrier agent: 1 channel
+            channel_data = agent_image[:, :, 0]
+            # Normalize to 0-255 for PNG
+            channel_data_uint8 = ((channel_data - channel_data.min()) /
+                                 (channel_data.max() - channel_data.min() + 1e-8) * 255).astype(np.uint8)
+
+            img = Image.fromarray(channel_data_uint8, mode='L')
+            filename = save_dir / f"step_{self.gif_step_count:06d}_channel_0.png"
+            img.save(filename)
+
+        self.gif_step_count += 1
+
+        # Debug logging for first few saves and periodically
+        if self.gif_step_count <= 3 or self.gif_step_count % 20 == 0:
+            print(f"[GIF DEBUG PID {os.getpid()}] Saved step {self.gif_step_count-1} images to {save_dir.absolute()}")
+            print(f"[GIF DEBUG PID {os.getpid()}] Directory contents: {[f.name for f in save_dir.glob('*')][:5]}")
 
     def close(self):
         """Close the base environment."""
