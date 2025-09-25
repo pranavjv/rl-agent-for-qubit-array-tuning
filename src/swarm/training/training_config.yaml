@@ -10,15 +10,13 @@ defaults:
 wandb:
   entity: "rl_agents_for_tuning"
   project: "RLModel"
-  
-  log_images: false        # Whether to log environment images to Wandb
   ema_period: 20          # EMA smoothing length
 
 # Ray cluster configuration
 ray:
   include_dashboard: false   # Disable Ray dashboard for cleaner output
-  log_to_driver: false      # Reduce driver logs
-  logging_level: 30         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
+  log_to_driver: true      # Reduce driver logs
+  logging_level: 10         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
   
   # Runtime environment settings
   runtime_env:
@@ -51,7 +49,8 @@ rl_config:
 
   # Environment runners configuration
   env_runners:
-    num_env_runners: 21              # Number of parallel environment runners
+    num_env_runners: 8              # Number of parallel environment runners
+
     rollout_fragment_length: 50     # Steps per rollout fragment
     sample_timeout_s: 600.0         # Timeout for sampling - set higher with fewer env runners
     num_gpus_per_env_runner: 0.3     # GPU allocation per runner
@@ -63,7 +62,7 @@ rl_config:
 
   # Training hyperparameters
   training:
-    train_batch_size: 16384          # Total batch size for training
+    train_batch_size: 4096 #16384          # Total batch size for training
     minibatch_size: 2048             # Size of minibatches for SGD
     num_epochs: 10                   # Number of SGD epochs per training iteration
     grad_clip: 10.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
@@ -120,6 +119,14 @@ resources:
 checkpoints:
   save_dir: "./checkpoints"         # Directory to save checkpoints
   upload_best_only: true           # Only upload checkpoints with improved performance
+
+# GIF capture configuration for agent visualization
+gif_capture:
+  enabled: true                     # Enable/disable GIF capture
+  target_agent_type: "plunger"     # Agent type to capture: "plunger" or "barrier"
+  target_agent_index: 1            # Which agent of that type (0-indexed)
+  save_dir: "/tmp/shared_gif_captures"  # Absolute path accessible to both main process and workers
+  fps: 0.5                          # Frame rate for GIFs (slower = easier to see)
 
 # Neural Network Architecture Configuration
 neural_networks:
