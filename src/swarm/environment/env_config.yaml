@@ -20,7 +20,7 @@ simulator:
     # Voltage sweep ranges for charge stability diagram
     gate_voltage_sweep_range: {"min": -1.0, "max": 1.0}
     # Total gate voltage range
-    gate_voltage_range: {"min": -10, "max": 10}
+    # gate_voltage_range: {"min": -10, "max": 10}
     # Admissible action range for delta voltages
     gate_delta_range: {"min": -2.0, "max": 2.0}
     # Total barrier voltage range
@@ -28,13 +28,18 @@ simulator:
     # resolution for simulator images
     resolution: 100
 
+    reward_window_size: 20 # window size normalisation for plunger reward calculation
+    gate_reward_exp: 1.0 # exponent for plunger reward
+
     # domain randomisation parameters (only for gate voltages)
-    random_window_size: {"min": 0.5, "max": 1.5} # scale factor that multiplies gate_voltage_sweep_range
-    random_action_scaling: {"min": 0.95, "max": 1.05}
-    random_action_offset: {"min": 0.0, "max": 0.0} # set to zero for now, since with center offset this is redundant
-    random_center_offset: {"min": -10.0, "max": 10.0} # applied consistently to all voltages
+    gate_voltage_range_min: {"min": -20, "max": -5}
+    gate_voltage_range_max: {"min": 5, "max": 15}
 
-
+    random_window_size: {"min": 0.9, "max": 1.5} # scale factor that multiplies gate_voltage_sweep_range
+    random_action_scaling: {"min": 0.0, "max": 0.0}
+    random_action_offset: {"min": 0.0, "max": 0.0}
+    random_center_offset: {"min": 0.0, "max": 0.0}
+    
 capacitance_model:
   update_method: "fake"  # Options: null (does not update vgm), "fake" (for testing/debugging), "bayesian" (simple prior), "kriging" (history based spatial prior)
 

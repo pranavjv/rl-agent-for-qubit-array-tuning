@@ -3,7 +3,7 @@
 
 # Default training parameters
 defaults:
-  num_iterations: 200        # Total training iterations
+  num_iterations: 400        # Total training iterations
   num_gpus: 8                # Default number of GPUs to use
 
 # Weights & Biases configuration
@@ -70,7 +70,7 @@ rl_config:
 
     # PPO-specific config
     lr: 0.0003                      # Learning rate
-    gamma: 0.99                     # Discount factor
+    gamma: 0.0                      # Discount factor
     lambda_: 0.95                   # GAE lambda parameter
     clip_param: 0.2                 # PPO clipping parameter
     entropy_coeff: 0.01             # Entropy regularization coefficient
@@ -142,7 +142,7 @@ neural_networks:
       feature_size: 512
       adaptive_pooling: true
       lstm:
-        enabled: false
+        enabled: true
         cell_size: 512
         num_layers: 2
         max_seq_len: 50

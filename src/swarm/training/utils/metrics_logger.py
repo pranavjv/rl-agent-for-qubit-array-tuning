@@ -104,21 +104,30 @@ def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
     metrics["plunger_metrics"] = {
         "policy_loss": plunger_policy.get("policy_loss", None),
         "vf_loss": plunger_policy.get("vf_loss", None),
+        "vf_loss_unclipped": plunger_policy.get("vf_loss_unclipped", None),
         "vf_explained_var": plunger_policy.get("vf_explained_var", None),
         "entropy": plunger_policy.get("entropy", None),
         "mean_kl": plunger_policy.get("mean_kl_loss", None),
         "advantage_mean": plunger_policy.get("advantage_mean", None),
         "advantage_variance": plunger_policy.get("advantage_variance", None),
+        # Gradient norms (from Ray's built-in gradient logging)
+        "grad_norm": plunger_policy.get("gradients_default_optimizer_global_norm", None),
+        # Value function prediction statistics (from custom learner)
+        "vf_predictions_mean": plunger_policy.get("vf_predictions_mean", None),
+        "vf_predictions_variance": plunger_policy.get("vf_predictions_variance", None),
     }
 
     metrics["barrier_metrics"] = {
         "policy_loss": barrier_policy.get("policy_loss", None),
         "vf_loss": barrier_policy.get("vf_loss", None),
+        "vf_loss_unclipped": barrier_policy.get("vf_loss_unclipped", None),
         "vf_explained_var": barrier_policy.get("vf_explained_var", None),
         "entropy": barrier_policy.get("entropy", None),
         "mean_kl": barrier_policy.get("mean_kl_loss", None),
         "advantage_mean": barrier_policy.get("advantage_mean", None),
         "advantage_variance": barrier_policy.get("advantage_variance", None),
+        # Gradient norms (from Ray's built-in gradient logging)
+        "grad_norm": barrier_policy.get("gradients_default_optimizer_global_norm", None),
     }
 
     # System metrics
@@ -257,6 +266,16 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
                 "plunger_advantage_variance": p_metrics["advantage_variance"],
             }
         )
+    
+    # Add gradient norm if available
+    if p_metrics["grad_norm"] is not None:
+        log_dict["plunger_grad_norm"] = p_metrics["grad_norm"]
+    
+    # Add value function prediction statistics if available
+    if p_metrics["vf_predictions_mean"] is not None:
+        log_dict["plunger_vf_predictions_mean"] = p_metrics["vf_predictions_mean"]
+    if p_metrics["vf_predictions_variance"] is not None:
+        log_dict["plunger_vf_predictions_variance"] = p_metrics["vf_predictions_variance"]
 
     # Barrier policy metrics
     b_metrics = metrics["barrier_metrics"]
@@ -279,6 +298,10 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
                 "barrier_advantage_variance": b_metrics["advantage_variance"],
             }
         )
+    
+    # Add gradient norm if available
+    if b_metrics["grad_norm"] is not None:
+        log_dict["barrier_grad_norm"] = b_metrics["grad_norm"]
 
     # Policy log std metrics from callbacks
     learners = result.get("learners", {})

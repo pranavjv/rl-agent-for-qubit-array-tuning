@@ -116,7 +116,7 @@ def run_inference_episode(algo, max_steps=100, deterministic=True):
             # Check if episode is done
             if terminated or truncated:
                 print(f"Episode ended at step {step + 1}")
-                break
+                # break
         
         print(f"Episode completed with {len(scan_history)} frames")
         return scan_history
