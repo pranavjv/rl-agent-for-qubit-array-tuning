@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 import ray
 from tqdm import tqdm
+import yaml
 
 # Add parent directory to path for imports
 current_file_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,16 +34,29 @@ for path in [environment_dir, swarm_dir, project_root]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
+def load_ray_config(config_path: str = None) -> Dict[str, Any]:
+    """Load Ray configuration from YAML file."""
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(__file__), "ray_config.yaml")
+    
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Ray config file not found: {config_path}")
+    
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
 @dataclass
 class GenerationConfig:
     """Configuration for dataset generation"""
     total_samples: int
     num_dots: int
+    use_barriers: bool
     output_dir: str
     config_path: str
     gpu_ids: str
     batch_size: int = 1000
     voltage_offset_range: float = 0.1
+    barrier_offset_range: float = 5.0
     seed_base: int = 42
     min_obs_voltage_size: float = 0.5 # allows adjustable random window width, set equal to give fixed values
     max_obs_voltage_size: float = 1.5 #
@@ -80,30 +94,32 @@ def enforce_cuda_availability(gpu_ids_str: str) -> List[int]:
 class QarrayWorkerActor:
     """Ray Actor that holds a single QarrayBaseClass instance for one GPU"""
     
-    def __init__(self, gpu_id: int, config_dict: dict):
+    def __init__(self, gpu_id: int, config_dict: dict, ray_config_dict: dict):
         import os
         import sys
         
         self.worker_pid = os.getpid()
         self.gpu_id = gpu_id
         self.samples_generated = 0
+        self.ray_config = ray_config_dict
         
-        # Add paths in actor
+        # Add paths in actor - need to add src directory to find swarm package
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
-        environment_dir = os.path.abspath(os.path.join(current_file_dir, '..', 'Environment'))
-        if environment_dir not in sys.path:
-            sys.path.insert(0, environment_dir)
+        src_dir = os.path.abspath(os.path.join(current_file_dir, '..', '..'))
+        if src_dir not in sys.path:
+            sys.path.insert(0, src_dir)
         
-        # Set memory settings for this actor (conservative since we have full GPU)
-        os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.8'  # Use 80% since we have full GPU
-        os.environ['XLA_FLAGS'] = '--xla_gpu_enable_command_buffer='
-        os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+        # Set memory settings for this actor from config
+        env_config = ray_config_dict['ray']['environment']
+        os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = env_config['XLA_PYTHON_CLIENT_MEM_FRACTION']
+        os.environ['XLA_FLAGS'] = env_config['XLA_FLAGS']
+        os.environ['TF_GPU_ALLOCATOR'] = env_config['TF_GPU_ALLOCATOR']
                 
         # Reconstruct config
         self.config = GenerationConfig(**config_dict)
         
         try:
-            from qarray_base_class import QarrayBaseClass
+            from swarm.environment.qarray_base_class import QarrayBaseClass
             
             # Create single QarrayBaseClass instance that will be reused
             self.qarray_class = QarrayBaseClass
@@ -123,8 +139,11 @@ class QarrayWorkerActor:
 
             obs_voltage_size = np.random.uniform(self.config.min_obs_voltage_size, self.config.max_obs_voltage_size)
 
+            use_barriers = self.config.use_barriers
+            
             qarray = self.qarray_class(
                 num_dots=self.config.num_dots,
+                use_barriers=use_barriers,
                 config_path=self.config.config_path,
                 obs_voltage_min=-obs_voltage_size,
                 obs_voltage_max=obs_voltage_size,
@@ -132,7 +151,7 @@ class QarrayWorkerActor:
             )
             
             # Get ground truth voltages
-            gt_voltages = qarray.calculate_ground_truth()
+            gt_voltages, vb_optimal, _ = qarray.calculate_ground_truth()
             
             # Add random offset to ground truth for observation
             rng = np.random.default_rng(self.config.seed_base + sample_id)
@@ -142,9 +161,18 @@ class QarrayWorkerActor:
                 size=len(gt_voltages)
             )
             gate_voltages = gt_voltages + voltage_offset
+
+            if use_barriers:
+                barrier_offset = rng.uniform(
+                    -self.config.barrier_offset_range,
+                    self.config.barrier_offset_range,
+                    size=len(vb_optimal)
+                )
+
+                barrier_voltages = vb_optimal + barrier_offset
             
-            # Create dummy barrier voltages
-            barrier_voltages = [0.0] * (self.config.num_dots - 1)
+            else:
+                barrier_voltages = [0.0] * (self.config.num_dots - 1)
             
             # Generate observation
             obs = qarray._get_obs(gate_voltages, barrier_voltages)
@@ -241,7 +269,7 @@ def create_output_directories(output_dir: Path) -> None:
 
 
 
-def run_test_mode(config: GenerationConfig) -> None:
+def run_test_mode(config: GenerationConfig, ray_config_path: str = None) -> None:
     """
     Run test mode: generate 20 random samples with visualization but no file saving.
     
@@ -249,6 +277,10 @@ def run_test_mode(config: GenerationConfig) -> None:
         config: Generation configuration (most parameters ignored in test mode)
     """
     print("Running test mode: generating 16 random samples with visualization...")
+    
+    # Load Ray configuration
+    ray_config = load_ray_config(ray_config_path)
+    test_config = ray_config['ray']['test_mode']
     
     # Set matplotlib backend for file output
     import matplotlib
@@ -263,12 +295,13 @@ def run_test_mode(config: GenerationConfig) -> None:
     test_samples = []
     
     try:
-        # Initialize Ray with minimal resources for test mode
+        # Initialize Ray with settings from config
         ray.init(
             num_cpus=num_gpus + 1,
             num_gpus=num_gpus,
-            object_store_memory=2*1024*1024*1024,  # 2GB for test mode
-            include_dashboard=False,
+            object_store_memory=test_config['object_store_memory_gb']*1024*1024*1024,
+            include_dashboard=test_config['include_dashboard'],
+            _system_config=test_config['system_config']
         )
         print(f"Ray initialized for test mode")
         
@@ -276,11 +309,13 @@ def run_test_mode(config: GenerationConfig) -> None:
         config_dict = {
             'total_samples': config.total_samples,
             'num_dots': config.num_dots,
+            'use_barriers': config.use_barriers,
             'output_dir': config.output_dir,
             'config_path': config.config_path,
             'gpu_ids': config.gpu_ids,
             'batch_size': config.batch_size,
             'voltage_offset_range': config.voltage_offset_range,
+            'barrier_offset_range': config.barrier_offset_range,
             'seed_base': config.seed_base,
             'min_obs_voltage_size': config.min_obs_voltage_size,
             'max_obs_voltage_size': config.max_obs_voltage_size
@@ -288,10 +323,11 @@ def run_test_mode(config: GenerationConfig) -> None:
         
         # Create one actor (use first GPU for test mode)
         print(f"Creating test actor for GPU {gpu_list[0]}...")
-        actor = QarrayWorkerActor.remote(gpu_list[0], config_dict)
+        actor = QarrayWorkerActor.remote(gpu_list[0], config_dict, ray_config)
         
         # Wait for actor to initialize
-        status = ray.get(actor.get_status.remote(), timeout=60)
+        init_timeout = test_config['actor_timeouts']['actor_initialization']
+        status = ray.get(actor.get_status.remote(), timeout=init_timeout)
         if not status['initialized']:
             raise RuntimeError(f"Test actor failed to initialize: {status.get('init_error', 'Unknown error')}")
         
@@ -300,11 +336,12 @@ def run_test_mode(config: GenerationConfig) -> None:
         # Generate 16 test samples
         print("Generating test samples...")
         
+        sample_timeout = test_config['actor_timeouts']['sample_generation']
         for i in range(16):    
             try:
                 # Use completely random seeds for each sample
                 sample_id = np.random.randint(0, 1000000)
-                sample = ray.get(actor.generate_sample.remote(sample_id), timeout=30)
+                sample = ray.get(actor.generate_sample.remote(sample_id), timeout=sample_timeout)
                 
                 if sample.get('success', False):
                     test_samples.append(sample)
@@ -415,9 +452,13 @@ def save_metadata(config: GenerationConfig, output_dir: Path,
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)
 
-def generate_dataset(config: GenerationConfig) -> None:
+def generate_dataset(config: GenerationConfig, ray_config_path: str = None) -> None:
     """Generate the complete dataset using Ray Actors for reliable GPU usage"""
     output_dir = Path(config.output_dir)
+    
+    # Load Ray configuration
+    ray_config = load_ray_config(ray_config_path)
+    prod_config = ray_config['ray']['production']
     
     # Setup logging
     log_dir = output_dir / 'metadata'
@@ -443,26 +484,29 @@ def generate_dataset(config: GenerationConfig) -> None:
     num_gpus = len(gpu_list)
     logger.info(f"Using {num_gpus} GPU(s): {gpu_list}")
     
-    # Initialize Ray with exact resources needed
+    # Initialize Ray with settings from config
     try:
         ray.init(
             num_cpus=num_gpus + 2,  # Extra CPUs for coordination
             num_gpus=num_gpus,      # Exact GPU count
-            object_store_memory=8*1024*1024*1024,  # 8GB object store
-            include_dashboard=False,
+            object_store_memory=prod_config['object_store_memory_gb']*1024*1024*1024,
+            include_dashboard=prod_config['include_dashboard'],
+            _system_config=prod_config['system_config'],
             #ignore_reinit_error=True
         )
-        logger.info(f"Ray initialized with {num_gpus} GPUs and 8GB object store")
+        logger.info(f"Ray initialized with {num_gpus} GPUs and {prod_config['object_store_memory_gb']}GB object store")
         
         # Convert config to dict for Ray serialization
         config_dict = {
             'total_samples': config.total_samples,
             'num_dots': config.num_dots,
+            'use_barriers': config.use_barriers,
             'output_dir': config.output_dir,
             'config_path': config.config_path,
             'gpu_ids': config.gpu_ids,
             'batch_size': config.batch_size,
             'voltage_offset_range': config.voltage_offset_range,
+            'barrier_offset_range': config.barrier_offset_range,
             'seed_base': config.seed_base,
             'min_obs_voltage_size': config.min_obs_voltage_size,
             'max_obs_voltage_size': config.max_obs_voltage_size
@@ -474,13 +518,14 @@ def generate_dataset(config: GenerationConfig) -> None:
         
         for i, gpu_id in enumerate(gpu_list):
             print(f"  Creating actor {i} for GPU {gpu_id}...")
-            actor = QarrayWorkerActor.remote(gpu_id, config_dict)
+            actor = QarrayWorkerActor.remote(gpu_id, config_dict, ray_config)
             actors.append((i, actor))
         
         # Wait for all actors to initialize
         logger.info("Waiting for actors to initialize...")
+        init_timeout = prod_config['actor_timeouts']['actor_initialization']
         status_futures = [actor.get_status.remote() for _, actor in actors]
-        statuses = ray.get(status_futures, timeout=120)
+        statuses = ray.get(status_futures, timeout=init_timeout)
         
         initialized_actors = []
         for i, status in enumerate(statuses):
@@ -525,7 +570,7 @@ def generate_dataset(config: GenerationConfig) -> None:
             logger.info(f"Actor {actor_id}: assigned {len(sample_ids)} samples (IDs {sample_ids[0]}-{sample_ids[-1]})")
         
         # Process samples in chunks to manage memory
-        chunk_size = 50  # Samples per actor per chunk
+        chunk_size = ray_config['ray']['processing']['chunk_size']
         num_batches = (config.total_samples + config.batch_size - 1) // config.batch_size
         
         # Initialize progress bar
@@ -560,9 +605,10 @@ def generate_dataset(config: GenerationConfig) -> None:
             remaining_assignments = new_remaining
             
             # Process chunk results
+            chunk_timeout = prod_config['actor_timeouts']['chunk_processing']
             for actor_id, future, chunk_size_actual in chunk_futures:
                 try:
-                    chunk_results = ray.get(future, timeout=180)  # 3 minutes per chunk
+                    chunk_results = ray.get(future, timeout=chunk_timeout)
                     
                     # Add to current batch
                     current_batch_samples.extend(chunk_results)
@@ -645,6 +691,8 @@ def main():
                        help='Total number of samples to generate')
     parser.add_argument('--num_dots', type=int, default=8,
                        help='Number of quantum dots')
+    parser.add_argument('--use_barriers', action='store_true',
+                       help='Whether to use barrier gates in the model')
     parser.add_argument('--batch_size', type=int, default=1000,
                        help='Number of samples per batch file')
     parser.add_argument('--output_dir', type=str, default='./dataset',
@@ -661,6 +709,8 @@ def main():
                        help='Base random seed for reproducibility')
     parser.add_argument('--gpu_ids', type=str, default="7",
                        help='Comma-separated list of GPU IDs to use (e.g., "6,7" or "0")')
+    parser.add_argument('--ray_config', type=str, default="ray_config.yaml",
+                       help='Path to Ray configuration YAML file')
     parser.add_argument('--test', action='store_true',
                         help='Whether to run a sample run with visualisation')
     
@@ -670,10 +720,13 @@ def main():
         args.num_dots = 4
         print("Warning: test mode should run with 4 dots, setting num_dots to 4")
     
+    print(f"\nUsing barriers: {args.use_barriers}\n")
+    
     # Create configuration
     config = GenerationConfig(
         total_samples=args.total_samples,
         num_dots=args.num_dots,
+        use_barriers=args.use_barriers,
         output_dir=args.output_dir,
         config_path=args.config_path,
         gpu_ids=args.gpu_ids,
@@ -687,9 +740,9 @@ def main():
     # Run dataset generation
     try:
         if args.test:
-            run_test_mode(config)
+            run_test_mode(config, args.ray_config)
         else:
-            generate_dataset(config)
+            generate_dataset(config, args.ray_config)
     except KeyboardInterrupt:
         print("\nGeneration interrupted by user")
     except Exception as e:

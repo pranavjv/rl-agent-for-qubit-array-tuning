@@ -1,25 +1,24 @@
-from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import (
-    DefaultPPOTorchRLModule,
-)
+from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import DefaultPPOTorchRLModule
+from swarm.voltage_model.custom_sac_rl_module import CustomSACTorchRLModule
+
 from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec, RLModuleSpec
 
-from swarm.voltage_model.quantum_catalog import QuantumDeviceCatalog
+from swarm.voltage_model.custom_catalog import CustomPPOCatalog, CustomSACCatalog
 
 
-def create_rl_module_spec(env_instance, config_file=None) -> MultiRLModuleSpec:
+def create_rl_module_spec(env_instance, algo: str="ppo", config: dict=None) -> MultiRLModuleSpec:
     """
     Create policy specifications for RLlib with the plunger and barrier policies
     (note there are only TWO policies although each has multiple agent instances)
 
     Args:
         env_instance: Instance of the quantum device environment
-        config_file: Optional path to YAML configuration file for neural networks
+        config: Optional config dict
 
     Returns:
         MultiRLModuleSpec object
     """
     import numpy as np
-    import yaml
     from gymnasium import spaces
 
     # Get full environment spaces from base environment
@@ -38,7 +37,6 @@ def create_rl_module_spec(env_instance, config_file=None) -> MultiRLModuleSpec:
     barrier_high = full_action_space["action_barrier_voltages"].high[0]
 
     # Create observation space for gate agents
-
     gate_obs_space = spaces.Box(
         low=0.0,
         high=1.0,
@@ -95,14 +93,8 @@ def create_rl_module_spec(env_instance, config_file=None) -> MultiRLModuleSpec:
     )
 
     # Load neural network configuration from YAML file
-    if config_file is not None:
-        try:
-            with open(config_file, 'r') as f:
-                config_data = yaml.safe_load(f)
-            neural_networks_config = config_data.get('neural_networks', {})
-        except (FileNotFoundError, yaml.YAMLError):
-            print(f"Warning: Could not load config file {config_file}, using defaults")
-            neural_networks_config = {}
+    if config is not None and isinstance(config, dict):
+        neural_networks_config = config
     else:
         neural_networks_config = {}
     
@@ -110,22 +102,31 @@ def create_rl_module_spec(env_instance, config_file=None) -> MultiRLModuleSpec:
     plunger_config = neural_networks_config.get('plunger_policy', {})
     barrier_config = neural_networks_config.get('barrier_policy', {})
 
+    if algo=="ppo":
+        module_class = DefaultPPOTorchRLModule
+        catalog_class = CustomPPOCatalog
+    elif algo=="sac":
+        module_class = CustomSACTorchRLModule
+        catalog_class = CustomSACCatalog
+    else:
+        raise ValueError(f"Unsupported algorithm: {algo}")
+
     # Create single agent RLModule specs using new API
     plunger_spec = RLModuleSpec(
-        module_class=DefaultPPOTorchRLModule,
+        module_class=module_class,
         observation_space=gate_obs_space,
         action_space=gate_action_space,
         model_config=plunger_config,
-        catalog_class=QuantumDeviceCatalog,
+        catalog_class=catalog_class,
         inference_only=False,
     )
 
     barrier_spec = RLModuleSpec(
-        module_class=DefaultPPOTorchRLModule,
+        module_class=module_class,
         observation_space=barrier_obs_space,
         action_space=barrier_action_space,
         model_config=barrier_config,
-        catalog_class=QuantumDeviceCatalog,
+        catalog_class=catalog_class,
         inference_only=False,
     )
 

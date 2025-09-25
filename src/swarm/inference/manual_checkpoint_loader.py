@@ -51,17 +51,17 @@ def create_algo_config():
         )
         .multi_agent(
             policy_mapping_fn=policy_mapping_fn,
-            policies=config['ppo']['multi_agent']['policies'],
-            policies_to_train=config['ppo']['multi_agent']['policies_to_train'],
-            count_steps_by=config['ppo']['multi_agent']['count_steps_by'],
+            policies=config['rl_config']['multi_agent']['policies'],
+            policies_to_train=config['rl_config']['multi_agent']['policies_to_train'],
+            count_steps_by=config['rl_config']['multi_agent']['count_steps_by'],
         )
         .rl_module(
             rl_module_spec=rl_module_spec,
         )
         .env_runners(
             num_env_runners=0,  # Set to 0 for inference
-            rollout_fragment_length=config['ppo']['env_runners']['rollout_fragment_length'],
-            sample_timeout_s=config['ppo']['env_runners']['sample_timeout_s'],
+            rollout_fragment_length=config['rl_config']['env_runners']['rollout_fragment_length'],
+            sample_timeout_s=config['rl_config']['env_runners']['sample_timeout_s'],
             num_gpus_per_env_runner=0,  # No GPUs for env runners in inference
         )
         .learners(
@@ -69,15 +69,15 @@ def create_algo_config():
             num_gpus_per_learner=0  # No GPUs for learners in inference
         )
         .training(
-            train_batch_size=config['ppo']['training']['train_batch_size'],
-            minibatch_size=config['ppo']['training']['minibatch_size'],
-            lr=config['ppo']['training']['lr'],
-            gamma=config['ppo']['training']['gamma'],
-            lambda_=config['ppo']['training']['lambda_'],
-            clip_param=config['ppo']['training']['clip_param'],
-            entropy_coeff=config['ppo']['training']['entropy_coeff'],
-            vf_loss_coeff=config['ppo']['training']['vf_loss_coeff'],
-            num_epochs=config['ppo']['training']['num_epochs'],
+            train_batch_size=config['rl_config']['training']['train_batch_size'],
+            minibatch_size=config['rl_config']['training']['minibatch_size'],
+            lr=config['rl_config']['training']['lr'],
+            gamma=config['rl_config']['training']['gamma'],
+            lambda_=config['rl_config']['training']['lambda_'],
+            clip_param=config['rl_config']['training']['clip_param'],
+            entropy_coeff=config['rl_config']['training']['entropy_coeff'],
+            vf_loss_coeff=config['rl_config']['training']['vf_loss_coeff'],
+            num_epochs=config['rl_config']['training']['num_epochs'],
         )
         .resources(num_gpus=0)  # No GPUs for inference
     )

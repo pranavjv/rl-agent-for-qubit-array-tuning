@@ -24,6 +24,7 @@ from pathlib import Path
 import ray
 import wandb
 from ray.rllib.algorithms.ppo import PPOConfig
+from ray.rllib.algorithms.sac import SACConfig
 from ray.tune.registry import register_env
 
 # Set logging level to reduce verbosity
@@ -43,10 +44,128 @@ from swarm.training.utils import (  # noqa: E402
     print_training_progress,
     setup_wandb_metrics,
     upload_checkpoint_artifact,
+    log_scans_to_wandb,
     policy_mapping_fn,
+    CustomCallbacks,
 )
 
 from swarm.voltage_model import create_rl_module_spec
+
+
+def parse_config_overrides(unknown_args):
+    """Parse config override arguments in the format --key.subkey value or --key=value (allows dynamically overriding settings when calling train.py)"""
+    overrides = {}
+    i = 0
+    while i < len(unknown_args):
+        arg = unknown_args[i]
+        if arg.startswith('--'):
+            # Handle both --key=value and --key value formats
+            if '=' in arg:
+                # Format: --key=value
+                key_value = arg[2:]  # Remove '--' prefix
+                key, value = key_value.split('=', 1)
+                i += 1
+            elif i + 1 < len(unknown_args) and not unknown_args[i + 1].startswith('--'):
+                # Format: --key value
+                key = arg[2:]  # Remove '--' prefix
+                value = unknown_args[i + 1]
+                i += 2
+            else:
+                # Standalone flag or no value
+                i += 1
+                continue
+            
+            # Type conversion
+            try:
+                # Handle None as string
+                if value.lower() == 'none':
+                    value = None
+                elif value.lower() in ('true', 'false'):
+                    # Handle boolean
+                    value = value.lower() == 'true'
+                else:
+                    # Try to convert to number (handles both int, float, and scientific notation)
+                    try:
+                        # First try float (handles scientific notation like 1e-05)
+                        float_val = float(value)
+                        # If it's a whole number, convert to int
+                        if float_val.is_integer() and 'e' not in value.lower() and '.' not in value:
+                            value = int(float_val)
+                        else:
+                            value = float_val
+                    except ValueError:
+                        # Keep as string if not a number
+                        pass
+            except (ValueError, AttributeError):
+                pass  # Keep as string
+                
+            overrides[key] = value
+        else:
+            i += 1
+    return overrides
+
+
+def map_sweep_parameters(overrides):
+    """Map sweep parameter names to config paths for wandb sweep compatibility."""
+    # Mapping from sweep parameter names to config paths
+    sweep_param_mapping = {
+        # Core training parameters
+        'minibatch_size': 'rl_config.training.minibatch_size',
+        'num_epochs': 'rl_config.training.num_epochs',
+        'lr': 'rl_config.training.lr',
+        'gamma': 'rl_config.training.gamma',
+        'lambda_': 'rl_config.training.lambda_',
+        'clip_param': 'rl_config.training.clip_param',
+        'entropy_coeff': 'rl_config.training.entropy_coeff',
+        'vf_loss_coeff': 'rl_config.training.vf_loss_coeff',
+        'kl_target': 'rl_config.training.kl_target',
+        'grad_clip': 'rl_config.training.grad_clip',
+        'grad_clip_by': 'rl_config.training.grad_clip_by',
+        'train_batch_size': 'rl_config.training.train_batch_size',
+        
+        # Algorithm choice
+        'algorithm': 'rl_config.algorithm',
+        
+        # Training control
+        'num_iterations': 'defaults.num_iterations',
+    }
+    
+    mapped_overrides = {}
+    
+    for key, value in overrides.items():
+        if key in sweep_param_mapping:
+            # Map sweep parameter to config path
+            config_path = sweep_param_mapping[key]
+            mapped_overrides[config_path] = value
+            print(f"Mapped sweep parameter: {key} -> {config_path} = {value}")
+        else:
+            # Keep original key (might be a nested config path already)
+            mapped_overrides[key] = value
+            print(f"Direct config override: {key} = {value}")
+    
+    return mapped_overrides
+
+
+def apply_config_overrides(config, overrides):
+    """Apply config overrides using dot notation to nested dictionary."""
+    # First map sweep parameters to config paths
+    mapped_overrides = map_sweep_parameters(overrides)
+    
+    for key, value in mapped_overrides.items():
+        keys = key.split('.')
+        current = config
+        
+        # Navigate to the parent of the target key
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+        
+        # Set the final value
+        current[keys[-1]] = value
+        print(f"Config override applied: {key} = {value}")
+    
+    return config
 
 
 def find_latest_checkpoint(checkpoint_dir):
@@ -86,8 +205,10 @@ def find_latest_checkpoint(checkpoint_dir):
     return latest_checkpoint, max_iteration
 
 
+
+
 def parse_arguments():
-    """Parse command line arguments for checkpoint loading."""
+    """Parse command line arguments for checkpoint loading and config overrides."""
     parser = argparse.ArgumentParser(description='Multi-agent RL training for quantum device tuning')
     
     parser.add_argument(
@@ -108,30 +229,208 @@ def parse_arguments():
         help='Disable Weights & Biases logging'
     )
     
-    return parser.parse_args()
+    # Parse known args to allow for dynamic config overrides
+    args, unknown = parser.parse_known_args()
+    
+    # Parse config overrides from remaining arguments
+    config_overrides = parse_config_overrides(unknown)
+    args.config_overrides = config_overrides
+    
+    return args
 
 
 
 def create_env(config=None):
-    """Create multi-agent quantum environment."""
+    """Create multi-agent quantum environment with JAX safety."""
+    import os
+    import jax
+    
+    # Ensure JAX settings are applied in worker processes
+    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+    os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.1")
+    os.environ.setdefault("JAX_ENABLE_X64", "true")
+    
+    # Try to clear any existing JAX state
+    try:
+        # Force JAX to use a fresh backend in each worker
+        jax.clear_backends()
+    except:
+        pass
+    
     from swarm.environment.multi_agent_wrapper import MultiAgentEnvWrapper
 
     # Wrap in multi-agent wrapper (config unused but required by RLlib)
     return MultiAgentEnvWrapper()
 
 
+def create_env_to_module_connector(env, spaces, device, use_deltas):
+    """
+    Creates module connector for action to memory handling.
+    Note: do not modify the signature, ray expects these arguments
+    
+    Args:
+        env: The (vectorized) gym environment
+        spaces: Dict with space info like {'__env__': ([obs_space, act_space]), '__env_single__': ([obs_space, act_space])}
+        device: Torch device (can be None)
+        use_deltas: Whether to use delta actions (from partial)
+    """
+    if use_deltas:
+        from swarm.voltage_model.prev_action_handling import CustomPrevActionHandling
+        return [CustomPrevActionHandling()]
+    else:
+        # Return empty list - let Ray handle everything with defaults
+        return []
+
+
 def load_config():
     """Load training configuration from YAML file."""
     config_path = Path(__file__).parent / "training_config.yaml"
-    
+
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
+
     return config
 
 
+def cleanup_gif_lock_file():
+    """Remove gif capture lock file from previous training runs."""
+    import os
+
+    lock_file = "/tmp/gif_capture_worker.lock"
+    try:
+        os.remove(lock_file)
+        print("Cleaned up previous GIF capture lock file")
+    except FileNotFoundError:
+        pass  # Already gone, that's fine
+    except Exception as e:
+        print(f"Warning: Could not remove GIF lock file: {e}")
+
+
+def process_and_log_gifs(iteration_num, config, use_wandb=True):
+    """Process saved images into GIFs and log to Wandb."""
+    from pathlib import Path
+    import shutil
+
+    gif_save_dir = Path(config['gif_capture']['save_dir'])
+
+    print(f"[DEBUG] Checking for images in: {gif_save_dir.absolute()}")
+    print(f"[DEBUG] Directory exists: {gif_save_dir.exists()}")
+
+    if gif_save_dir.exists():
+        all_files = list(gif_save_dir.glob("*"))
+        png_files = list(gif_save_dir.glob("step_*.png"))
+        print(f"[DEBUG] Total files in directory: {len(all_files)}")
+        print(f"[DEBUG] PNG files found: {len(png_files)}")
+        if all_files:
+            print(f"[DEBUG] First few files: {[f.name for f in all_files[:5]]}")
+
+    if not gif_save_dir.exists() or not any(gif_save_dir.glob("step_*.png")):
+        print("[DEBUG] No images to process - exiting")
+        return
+
+    try:
+        print(f"Processing GIFs for iteration {iteration_num}...")
+
+        # Get all saved images
+        image_files = sorted(gif_save_dir.glob("step_*.png"))
+
+        if not image_files:
+            print("No images found for GIF creation")
+            return
+
+        # Group images by channel
+        channel_files = {}
+        for img_file in image_files:
+            # Parse filename: step_XXXXXX_channel_Y.png
+            parts = img_file.stem.split('_')
+            if len(parts) >= 4:
+                channel = int(parts[3])  # channel number
+                if channel not in channel_files:
+                    channel_files[channel] = []
+                channel_files[channel].append(img_file)
+
+        # Create numpy arrays and log to Wandb
+        if use_wandb and channel_files:
+            _log_images_as_video_to_wandb(channel_files, iteration_num, config)
+
+        # Clean up temporary files
+        shutil.rmtree(gif_save_dir, ignore_errors=True)
+        print(f"Processed {len(channel_files)} channels and cleaned up images")
+
+    except Exception as e:
+        print(f"Error processing GIFs: {e}")
+        # Clean up on error
+        shutil.rmtree(gif_save_dir, ignore_errors=True)
+
+
+def _log_images_as_video_to_wandb(channel_files, iteration_num, config):
+    """Convert images to numpy arrays and log as videos to Wandb."""
+    try:
+        import wandb
+        import numpy as np
+        from PIL import Image
+
+        log_dict = {}
+        fps = config['gif_capture'].get('fps', 0.5)  # Default to 0.5 if not specified
+
+        for channel, files in channel_files.items():
+            if not files:
+                continue
+
+            # Sort files by step number
+            sorted_files = sorted(files, key=lambda x: int(x.stem.split('_')[1]))
+
+            if len(sorted_files) < 2:
+                print(f"Not enough images for channel {channel} video (need at least 2)")
+                continue
+
+            # Load images into numpy array
+            images = []
+            for img_file in sorted_files:
+                img = Image.open(img_file)
+                img_array = np.array(img)
+
+                # Convert grayscale to RGB if needed (wandb.Video expects 3 channels)
+                if len(img_array.shape) == 2:
+                    img_array = np.stack([img_array] * 3, axis=-1)
+
+                images.append(img_array)
+
+            # Add black frames at start for easy loop detection
+            if images:
+                # Create black frames with same shape as first image
+                black_frame = np.zeros_like(images[0])
+
+                # Add 3 black frames at start and 2 at end
+                images = [black_frame] * 3 + images + [black_frame] * 2
+
+            # Convert to numpy array with shape (frames, height, width, channels)
+            video_array = np.stack(images, axis=0)
+
+            # Reorder to (frames, channels, height, width) as expected by wandb.Video
+            video_array = np.transpose(video_array, (0, 3, 1, 2))
+
+            # Create wandb.Video with slow framerate for easy viewing
+            log_key = f"agent_vision_channel_{channel}"
+            log_dict[log_key] = wandb.Video(
+                video_array,
+                fps=fps,
+                format="gif",
+                caption=f"Agent vision channel {channel}, iteration {iteration_num}"
+            )
+
+        # Add iteration info
+        if log_dict:
+            log_dict["gif_iteration"] = iteration_num
+            wandb.log(log_dict)
+            print(f"Logged {len(log_dict)-1} video channels to Wandb for iteration {iteration_num}")
+
+    except Exception as e:
+        print(f"Error logging videos to Wandb: {e}")
+
+
 def main():
-    """Main training function using Ray RLlib 2.49.0 modern API with wandb logging."""
+    """Main training function using Ray RLlib 2.49.0 API with wandb logging."""
 
     # Parse command line arguments
     args = parse_arguments()
@@ -139,15 +438,26 @@ def main():
     use_wandb = not args.disable_wandb
     
     config = load_config()
+    
+    # Apply command line overrides to config
+    if hasattr(args, 'config_overrides') and args.config_overrides:
+        config = apply_config_overrides(config, args.config_overrides)
 
     # Initialize Weights & Biases
     if use_wandb:
         wandb.init(
             entity=config['wandb']['entity'], 
-            project=config['wandb']['project'], 
-            config=config
+            project=config['wandb']['project']
         )
-        setup_wandb_metrics()
+        # Log the final config (with command line overrides) to wandb
+        wandb.config.update(config)
+        setup_wandb_metrics(config['wandb']['ema_period'])
+        
+        # Log the training config as an artifact
+        config_artifact = wandb.Artifact("training_config", type="config", metadata=config)
+        config_path = Path(__file__).parent / "training_config.yaml"
+        config_artifact.add_file(str(config_path), "training_config.yaml")
+        wandb.log_artifact(config_artifact)
 
     # Initialize Ray with runtime environment from config
     ray_config = {
@@ -160,6 +470,11 @@ def main():
             "env_vars": {
                 **config['ray']['runtime_env']['env_vars'],
                 "SWARM_PROJECT_ROOT": str(project_root),
+                # GIF capture configuration
+                "GIF_CAPTURE_ENABLED": str(config['gif_capture']['enabled']),
+                "GIF_CAPTURE_AGENT_TYPE": config['gif_capture']['target_agent_type'],
+                "GIF_CAPTURE_AGENT_INDEX": str(config['gif_capture']['target_agent_index']),
+                "GIF_CAPTURE_SAVE_DIR": config['gif_capture']['save_dir'],
             },
         },
     }
@@ -171,50 +486,113 @@ def main():
         register_env("qarray_multiagent_env", create_env)
         env_instance = create_env()
 
-        rl_module_spec = create_rl_module_spec(env_instance)
+        # Log environment config to wandb
+        if use_wandb:
+            env_config = env_instance.base_env.config
+            wandb.config.update({"env_config": env_config})
 
-        ppo_config = (
-            PPOConfig()
+        # Optionally update the rl module config to allow log_std clamping, shared log_std vector etc.
+        rl_module_config = {
+            "plunger_policy": {
+                "free_log_std": config['rl_config']['multi_agent']['free_log_std'],
+                "log_std_bounds": config['rl_config']['multi_agent']['log_std_bounds'],
+            },
+            "barrier_policy": {
+                "free_log_std": config['rl_config']['multi_agent']['free_log_std'],
+                "log_std_bounds": config['rl_config']['multi_agent']['log_std_bounds'],
+            }
+        }
+        
+        algo = config['rl_config']['algorithm'].lower()
+
+        rl_module_spec = create_rl_module_spec(env_instance, algo=algo, config=rl_module_config)
+
+        # Configure custom callbacks for logging to Wandb
+        # log_images = config['wandb']['log_images']
+        # custom_callbacks = partial(CustomCallbacks, log_images=log_images)
+
+        # Specify algorithm-specific training parameters
+        ppo_train_config = {
+            "lr": config['rl_config']['training']['lr'],
+            "gamma": config['rl_config']['training']['gamma'],
+            "lambda_": config['rl_config']['training']['lambda_'],
+            "clip_param": config['rl_config']['training']['clip_param'],
+            "entropy_coeff": config['rl_config']['training']['entropy_coeff'],
+            "vf_loss_coeff": config['rl_config']['training']['vf_loss_coeff'],
+            "kl_target": config['rl_config']['training']['kl_target'],
+        }
+
+        sac_train_config = {
+            "actor_lr": config['rl_config']['training']['actor_lr'],
+            "critic_lr": config['rl_config']['training']['critic_lr'],
+            "alpha_lr": config['rl_config']['training']['alpha_lr'],
+            "twin_q": config['rl_config']['training']['twin_q'],
+            "tau": config['rl_config']['training']['tau'],
+            "initial_alpha": config['rl_config']['training']['initial_alpha'],
+            "target_entropy": config['rl_config']['training']['target_entropy'],
+            "n_step": config['rl_config']['training']['n_step'],
+            "clip_actions": config['rl_config']['training']['clip_actions'],
+            "target_network_update_freq": config['rl_config']['training']['target_network_update_freq'],
+            "num_steps_sampled_before_learning_starts": config['rl_config']['training']['num_steps_sampled_before_learning_starts'],
+            "replay_buffer_config": config['rl_config']['training']['replay_buffer_config'],
+        }
+
+        if algo == "ppo":
+            algo_config_builder = PPOConfig
+            train_config = ppo_train_config
+        elif algo == "sac":
+            algo_config_builder = SACConfig
+            train_config = sac_train_config
+        else:
+            raise ValueError(f"Unsupported algorithm: {algo}")
+
+        # Handle action parsing to memory manually
+        # use_deltas = env_instance.base_env.use_deltas
+        # env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
+
+        algo_config = (
+            algo_config_builder()
             .environment(
                 env="qarray_multiagent_env",
             )
             .multi_agent(
                 policy_mapping_fn=policy_mapping_fn,
-                policies=config['ppo']['multi_agent']['policies'],
-                policies_to_train=config['ppo']['multi_agent']['policies_to_train'],
-                count_steps_by=config['ppo']['multi_agent']['count_steps_by'],
+                policies=config['rl_config']['multi_agent']['policies'],
+                policies_to_train=config['rl_config']['multi_agent']['policies_to_train'],
+                count_steps_by=config['rl_config']['multi_agent']['count_steps_by'],
             )
             .rl_module(
                 rl_module_spec=rl_module_spec,
             )
             .env_runners(
-                num_env_runners=config['ppo']['env_runners']['num_env_runners'],
-                rollout_fragment_length=config['ppo']['env_runners']['rollout_fragment_length'],
-                sample_timeout_s=config['ppo']['env_runners']['sample_timeout_s'],
-                num_gpus_per_env_runner=config['ppo']['env_runners']['num_gpus_per_env_runner'],
+                num_env_runners=config['rl_config']['env_runners']['num_env_runners'],
+                rollout_fragment_length=config['rl_config']['env_runners']['rollout_fragment_length'],
+                sample_timeout_s=config['rl_config']['env_runners']['sample_timeout_s'],
+                num_gpus_per_env_runner=config['rl_config']['env_runners']['num_gpus_per_env_runner'],
+                # env_to_module_connector=env_to_module_connector,
+                # add_default_connectors_to_env_to_module_pipeline=True,  # Let Ray handle defaults
             )
             .learners(
-                num_learners=config['ppo']['learners']['num_learners'], 
-                num_gpus_per_learner=config['ppo']['learners']['num_gpus_per_learner']
+                num_learners=config['rl_config']['learners']['num_learners'], 
+                num_gpus_per_learner=config['rl_config']['learners']['num_gpus_per_learner']
             )
             .training(
-                train_batch_size=config['ppo']['training']['train_batch_size'],
-                minibatch_size=config['ppo']['training']['minibatch_size'],
-                lr=config['ppo']['training']['lr'],
-                gamma=config['ppo']['training']['gamma'],
-                lambda_=config['ppo']['training']['lambda_'],
-                clip_param=config['ppo']['training']['clip_param'],
-                entropy_coeff=config['ppo']['training']['entropy_coeff'],
-                vf_loss_coeff=config['ppo']['training']['vf_loss_coeff'],
-                num_epochs=config['ppo']['training']['num_epochs'],
+                train_batch_size=config['rl_config']['training']['train_batch_size'],
+                minibatch_size=config['rl_config']['training']['minibatch_size'],
+                num_epochs=config['rl_config']['training']['num_epochs'],
+                grad_clip=config['rl_config']['training']['grad_clip'],
+                grad_clip_by=config['rl_config']['training']['grad_clip_by'],
+                **train_config,
             )
             .resources(num_gpus=config['resources']['num_gpus'])
+            # .callbacks([custom_callbacks] if use_wandb else [])
         )
 
         # Build the algorithm
-        print("\nBuilding PPO algorithm...\n")
+        print(f"\nBuilding {algo} algorithm...\n")
 
-        algo = ppo_config.build()  # creates a PPO object
+        algo = algo_config.build()
+
 
         # Clean up the environment instance used for spec creation
         env_instance.close()
@@ -283,10 +661,27 @@ def main():
         config_save_path = checkpoint_base_dir / "training_config.yaml"
         with open(config_save_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        
+        # Also save environment config to checkpoint directory for inference
+        env_config_src = Path(__file__).parent.parent / "environment" / "env_config.yaml"
+        if env_config_src.exists():
+            env_config_dst = checkpoint_base_dir / "env_config.yaml"
+            import shutil
+            shutil.copy2(env_config_src, env_config_dst)
+            print(f"Environment config saved to: {env_config_dst}")
 
         remaining_iterations = config['defaults']['num_iterations'] - start_iteration
         print(f"\nStarting training for {remaining_iterations} iterations (from iteration {start_iteration + 1} to {config['defaults']['num_iterations']})...\n")
         print(f"Training config saved to: {config_save_path}\n")
+
+        # Clean up any previous GIF capture lock files
+        cleanup_gif_lock_file()
+
+        # Debug: Show main process working directory and where it will look for GIFs
+        import os
+        print(f"[MAIN DEBUG] PID {os.getpid()} working directory: {os.getcwd()}")
+        print(f"[MAIN DEBUG] Will look for GIFs in: {Path(config['gif_capture']['save_dir']).absolute()}")
+        print(f"[MAIN DEBUG] GIF capture config: enabled={config['gif_capture']['enabled']}, target={config['gif_capture']['target_agent_type']}_{config['gif_capture']['target_agent_index']}")
 
         training_start_time = time.time()
         best_reward = float("-inf")  # Track best performance for artifact upload
@@ -297,8 +692,17 @@ def main():
             # Clean console output and wandb logging
             print_training_progress(result, i, training_start_time)
 
-            # Log metrics to wandb
+            # Log metrics to wandb (EMA is calculated automatically in metrics_logger)
             log_to_wandb(result, i)
+
+            # Process and log GIFs if enabled
+            if config['gif_capture']['enabled'] and use_wandb:
+                print(f"[DEBUG] Looking for GIFs in iteration {i + 1}...")
+                process_and_log_gifs(i + 1, config, use_wandb)
+            elif config['gif_capture']['enabled']:
+                print(f"[DEBUG] GIF capture enabled but wandb disabled for iteration {i + 1}")
+            else:
+                print(f"[DEBUG] GIF capture disabled in config for iteration {i + 1}")
 
             # Save checkpoint using modern RLlib API
             local_checkpoint_dir = Path(config['checkpoints']['save_dir']) / f"iteration_{i+1}"

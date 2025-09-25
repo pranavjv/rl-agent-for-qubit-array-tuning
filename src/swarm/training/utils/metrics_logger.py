@@ -4,10 +4,48 @@ Clean metrics extraction and logging for Ray RLlib training.
 Provides professional console output and comprehensive wandb logging.
 """
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
+import numpy as np
 import psutil
 import wandb
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+
+
+# Global EMA state for sweep optimization
+_ema_state = {
+    'plunger_return_ema': None,
+    'ema_period': 20,
+    'ema_alpha': None
+}
+
+
+def initialize_ema(ema_period: int = 20):
+    """Initialize EMA tracking for sweep optimization."""
+    global _ema_state
+    _ema_state['ema_period'] = ema_period
+    _ema_state['ema_alpha'] = 2.0 / (ema_period + 1)
+    _ema_state['plunger_return_ema'] = None
+
+
+def update_ema(current_value: float) -> float:
+    """Update and return the EMA value."""
+    global _ema_state
+    
+    if _ema_state['ema_alpha'] is None:
+        initialize_ema()
+    
+    if _ema_state['plunger_return_ema'] is None:
+        _ema_state['plunger_return_ema'] = current_value
+    else:
+        _ema_state['plunger_return_ema'] = (
+            _ema_state['ema_alpha'] * current_value + 
+            (1 - _ema_state['ema_alpha']) * _ema_state['plunger_return_ema']
+        )
+    
+    return _ema_state['plunger_return_ema']
 
 
 def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,15 +104,21 @@ def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
     metrics["plunger_metrics"] = {
         "policy_loss": plunger_policy.get("policy_loss", None),
         "vf_loss": plunger_policy.get("vf_loss", None),
+        "vf_explained_var": plunger_policy.get("vf_explained_var", None),
         "entropy": plunger_policy.get("entropy", None),
         "mean_kl": plunger_policy.get("mean_kl_loss", None),
+        "advantage_mean": plunger_policy.get("advantage_mean", None),
+        "advantage_variance": plunger_policy.get("advantage_variance", None),
     }
 
     metrics["barrier_metrics"] = {
         "policy_loss": barrier_policy.get("policy_loss", None),
         "vf_loss": barrier_policy.get("vf_loss", None),
+        "vf_explained_var": barrier_policy.get("vf_explained_var", None),
         "entropy": barrier_policy.get("entropy", None),
         "mean_kl": barrier_policy.get("mean_kl_loss", None),
+        "advantage_mean": barrier_policy.get("advantage_mean", None),
+        "advantage_variance": barrier_policy.get("advantage_variance", None),
     }
 
     # System metrics
@@ -167,10 +211,6 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
     log_dict = {
         "iteration": iteration + 1,  # Log iteration for step metric
         "total_time": metrics["total_time"],
-        "iter_time": metrics["iter_time"],
-        "env_steps": metrics["env_steps"],
-        "memory_percent": metrics["memory_percent"],
-        "cpu_percent": metrics["cpu_percent"],
     }
 
     # Episode returns
@@ -186,7 +226,13 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
     # Multi-agent returns
     if metrics["agent_returns"]:
         if "plunger_avg" in metrics["agent_returns"]:
-            log_dict["plunger_return_avg"] = metrics["agent_returns"]["plunger_avg"]
+            plunger_return = metrics["agent_returns"]["plunger_avg"]
+            log_dict["plunger_return_avg"] = plunger_return
+            
+            # Update and log EMA for sweep optimization
+            plunger_return_ema = update_ema(plunger_return)
+            log_dict["plunger_return_ema"] = plunger_return_ema
+            
         if "barrier_avg" in metrics["agent_returns"]:
             log_dict["barrier_return_avg"] = metrics["agent_returns"]["barrier_avg"]
 
@@ -197,8 +243,18 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
             {
                 "plunger_policy_loss": p_metrics["policy_loss"],
                 "plunger_vf_loss": p_metrics["vf_loss"],
+                "plunger_vf_explained_var": p_metrics["vf_explained_var"],
                 "plunger_entropy": p_metrics["entropy"],
                 "plunger_mean_kl": p_metrics["mean_kl"],
+            }
+        )
+    
+    # Add advantage metrics if available
+    if p_metrics["advantage_mean"] is not None:
+        log_dict.update(
+            {
+                "plunger_advantage_mean": p_metrics["advantage_mean"],
+                "plunger_advantage_variance": p_metrics["advantage_variance"],
             }
         )
 
@@ -209,10 +265,57 @@ def log_to_wandb(result: Dict[str, Any], iteration: int):
             {
                 "barrier_policy_loss": b_metrics["policy_loss"],
                 "barrier_vf_loss": b_metrics["vf_loss"],
+                "barrier_vf_explained_var": b_metrics["vf_explained_var"],
                 "barrier_entropy": b_metrics["entropy"],
                 "barrier_mean_kl": b_metrics["mean_kl"],
             }
         )
+    
+    # Add advantage metrics if available
+    if b_metrics["advantage_mean"] is not None:
+        log_dict.update(
+            {
+                "barrier_advantage_mean": b_metrics["advantage_mean"],
+                "barrier_advantage_variance": b_metrics["advantage_variance"],
+            }
+        )
+
+    # Policy log std metrics from callbacks
+    learners = result.get("learners", {})
+    plunger_policy = learners.get("plunger_policy", {})
+    barrier_policy = learners.get("barrier_policy", {})
+
+    # Log std metrics for plunger policy
+    if "plunger_log_std_mean" in plunger_policy:
+        log_dict.update({
+            "plunger_log_std_mean": plunger_policy["plunger_log_std_mean"],
+            "plunger_log_std_min": plunger_policy.get("plunger_log_std_min"),
+            "plunger_log_std_max": plunger_policy.get("plunger_log_std_max"),
+            "plunger_policy_variance_mean": float(np.exp(plunger_policy["plunger_log_std_mean"] * 2))  # Convert log_std to variance
+        })
+
+    # Log std metrics for barrier policy  
+    if "barrier_log_std_mean" in barrier_policy:
+        log_dict.update({
+            "barrier_log_std_mean": barrier_policy["barrier_log_std_mean"],
+            "barrier_log_std_min": barrier_policy.get("barrier_log_std_min"),
+            "barrier_log_std_max": barrier_policy.get("barrier_log_std_max"),
+            "barrier_policy_variance_mean": float(np.exp(barrier_policy["barrier_log_std_mean"] * 2))  # Convert log_std to variance
+        })
+
+    # Check for scan images in custom metrics
+    env_runners = result.get("env_runners", {})
+    custom_metrics = env_runners.get("custom_metrics", {})
+    
+    if "scan_images" in custom_metrics and "scan_episode_count" in custom_metrics:
+        scan_images = custom_metrics["scan_images"]
+        episode_count = custom_metrics["scan_episode_count"]
+        
+        # Log scan images to wandb
+        try:
+            log_scans_to_wandb(scan_images, episode_count)
+        except Exception as e:
+            print(f"Error logging scans to wandb: {e}")
 
     # Log to wandb (don't specify step since we're logging iteration explicitly)
     wandb.log(log_dict)
@@ -254,18 +357,65 @@ def upload_checkpoint_artifact(checkpoint_path: str, iteration: int, reward: flo
         print(f"Failed to upload checkpoint artifact: {e}")
 
 
-def setup_wandb_metrics():
+def setup_wandb_metrics(ema_period: int = 20):
     """
     Setup wandb metric definitions for better visualization.
     Call this after wandb.init().
+    
+    Args:
+        ema_period: Period for EMA calculation (default: 20)
     """
     if not wandb.run:
         return
+    
+    # Initialize EMA with the specified period
+    initialize_ema(ema_period)
 
     # Define custom metrics for better tracking
     wandb.define_metric("iteration")
     wandb.define_metric("episode_return_mean", step_metric="iteration", summary="max")
     wandb.define_metric("plunger_return_avg", step_metric="iteration", summary="max")
+    wandb.define_metric("plunger_return_ema", step_metric="iteration", summary="max")
     wandb.define_metric("barrier_return_avg", step_metric="iteration", summary="max")
     wandb.define_metric("plunger_policy_loss", step_metric="iteration", summary="min")
     wandb.define_metric("barrier_policy_loss", step_metric="iteration", summary="min")
+
+
+def log_scans_to_wandb(scan_images, iteration: int):
+    """
+    Log scan images directly to wandb.
+    
+    Args:
+        scan_images: numpy array of shape (H, W, N-1) containing scan images
+        iteration: Current training iteration
+    """
+    if not wandb.run:
+        return
+        
+    try:
+        num_channels = scan_images.shape[2]
+        fig, axes = plt.subplots(1, num_channels, figsize=(4*num_channels, 4))
+        if num_channels == 1:
+            axes = [axes]
+        
+        scan_artifacts = {}
+        for ch in range(num_channels):
+            axes[ch].imshow(scan_images[:, :, ch], cmap='viridis')
+            axes[ch].set_title(f'Scan Channel {ch}')
+            axes[ch].axis('off')
+            
+            scan_artifacts[f'scan_channel_{ch}'] = wandb.Image(scan_images[:, :, ch])
+        
+        plt.tight_layout()
+        
+        wandb.log({
+            'scans/combined_view': wandb.Image(fig),
+            **{f'scans/{k}': v for k, v in scan_artifacts.items()},
+            'iteration': iteration
+        })
+        
+        plt.close(fig)
+        print(f"Logged {num_channels} scan images to wandb at iteration {iteration}")
+        
+    except Exception as e:
+        print(f"Error logging scans to wandb: {e}")

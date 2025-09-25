@@ -9,6 +9,7 @@ from single-channel capacitance images with uncertainty estimation.
 import os
 import argparse
 import time
+import json
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -113,6 +114,26 @@ def calculate_uncertainty_calibration(predictions: Tuple[torch.Tensor, torch.Ten
         'mean_uncertainty': uncertainties.mean().item(),
         'std_uncertainty': uncertainties.std().item()
     }
+
+
+def save_config(config: dict, save_dir: Path):
+    """Save training configuration to JSON file"""
+    config_path = save_dir / 'config.json'
+    
+    # Create a copy of config and convert non-serializable objects
+    config_to_save = config.copy()
+    
+    # Convert Path objects to strings
+    for key, value in config_to_save.items():
+        if isinstance(value, Path):
+            config_to_save[key] = str(value)
+        elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], Path):
+            config_to_save[key] = [str(p) for p in value]
+    
+    with open(config_path, 'w') as f:
+        json.dump(config_to_save, f, indent=2)
+    
+    print(f"Saved configuration to {config_path}")
 
 
 def create_scatter_plots(predictions: Tuple[torch.Tensor, torch.Tensor], 
@@ -533,6 +554,10 @@ def train_func(config: dict):
     output_dir = Path(config['output_dir'])
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Save configuration to weights directory (only on rank 0)
+    if train.get_context().get_world_rank() == 0:
+        save_config(config, output_dir)
+    
     # Initialize Wandb - only on rank 0 for distributed training
     if not config['no_wandb'] and train.get_context().get_world_rank() == 0:
         wandb.init(
@@ -586,7 +611,7 @@ def train_func(config: dict):
     
     # Create model and loss function
     print("Creating model...")
-    model = create_model()
+    model = create_model(mobilenet=config['mobilenet'])
     model = prepare_model(model)  # Ray Train preparation
     
     loss_fn = create_loss_function(
@@ -665,29 +690,29 @@ def main():
     parser.add_argument('--root_data_dir', type=str, 
                        default='/home/edn/rl-agent-for-qubit-array-tuning/src/swarm/capacitance_model/',
                        help='Path to dataset directory')
-    parser.add_argument('--data_dirs', type=str, nargs='+', default=['dataset', '4dot_dataset'],
+    parser.add_argument('--data_dirs', type=str, nargs='+', default=['dataset'],
                        help='List of data directories')
     parser.add_argument('--output_dir', type=str, default='./weights',
                        help='Directory to save model weights')
     parser.add_argument('--batch_size', type=int, default=64,
                        help='Batch size for training')
-    parser.add_argument('--epochs', type=int, default=5,
+    parser.add_argument('--epochs', type=int, default=10,
                        help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=1e-3,
+    parser.add_argument('--lr', type=float, default=5e-4,
                        help='Learning rate')
-    parser.add_argument('--val_split', type=float, default=0.2,
+    parser.add_argument('--val_split', type=float, default=0.1,
                        help='Validation split fraction')
     parser.add_argument('--num_workers', type=int, default=4,
                        help='Number of data loading workers')
     parser.add_argument('--disable_data_loading', action='store_true',
                        help='Disable loading all data to memory (requires ~15GB RAM)')
-    parser.add_argument('--mse_weight', type=float, default=100.0,
+    parser.add_argument('--mse_weight', type=float, default=10.0,
                        help='Weight for MSE loss component')
     parser.add_argument('--nll_weight', type=float, default=0.1,
                        help='Weight for NLL loss component (default 0.1 to balance scales)')
     parser.add_argument('--save_freq', type=int, default=10,
                        help='Save checkpoint every N epochs')
-    parser.add_argument('--gpus', type=str, nargs='+', default=["0"],
+    parser.add_argument('--gpus', type=str, nargs='+', default=["7"],
                        help='GPU indices to use for training (will automatically use DDP if more than one given)')
     parser.add_argument('--wandb_project', type=str, default='capacitance-prediction',
                        help='Wandb project name')
@@ -695,6 +720,8 @@ def main():
                        help='Wandb run name')
     parser.add_argument('--no_wandb', action='store_true',
                        help='Disable wandb logging')
+    parser.add_argument('--mobilenet', type=str, default='small', choices=['small', 'large'],
+                       help='MobileNet architecture size (small or large)')
     
     args = parser.parse_args()
     args.load_to_memory = not args.disable_data_loading
@@ -719,6 +746,7 @@ def main():
     use_distributed = num_gpus > 1
 
     if use_distributed:
+        print("WARNING: Distributed training is not efficient unless your dataset is huge. Consider using a single gpu")
         print(f"Starting distributed training on GPUs {gpu_list}...")
         
         # Set CUDA_VISIBLE_DEVICES to only the specified GPUs
@@ -730,6 +758,10 @@ def main():
             ray.init(
                 ignore_reinit_error=True,
                 include_dashboard=False,  # Consistent with existing codebase
+                _system_config={
+                    "verbose": 0,
+                    "suppress_warnings": True,
+                }
             )
         
         # Create scaling configuration
@@ -763,6 +795,9 @@ def main():
         device = setup_device()
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save configuration to weights directory
+        save_config(vars(args), output_dir)
         
         # Initialize Wandb
         if not args.no_wandb:
@@ -813,7 +848,7 @@ def main():
         
         # Create model and loss function
         print("Creating model...")
-        model = create_model()
+        model = create_model(mobilenet=args.mobilenet)
         model = model.to(device)
         
         loss_fn = create_loss_function(

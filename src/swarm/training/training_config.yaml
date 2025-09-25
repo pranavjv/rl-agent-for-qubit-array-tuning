@@ -10,12 +10,13 @@ defaults:
 wandb:
   entity: "rl_agents_for_tuning"
   project: "RLModel"
+  ema_period: 20          # EMA smoothing length
 
 # Ray cluster configuration
 ray:
   include_dashboard: false   # Disable Ray dashboard for cleaner output
-  log_to_driver: false      # Reduce driver logs
-  logging_level: 30         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
+  log_to_driver: true      # Reduce driver logs
+  logging_level: 10         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
   
   # Runtime environment settings
   runtime_env:
@@ -32,35 +33,69 @@ ray:
     env_vars:
       JAX_PLATFORM_NAME: "cuda"
       JAX_PLATFORMS: "cuda"
+      
       PYTHONWARNINGS: "ignore::DeprecationWarning"
       RAY_DEDUP_LOGS: "0"
       RAY_DISABLE_IMPORT_WARNING: "1"
 
-# PPO Algorithm Configuration
-ppo:
+      # Memory contention
+      XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+      XLA_PYTHON_CLIENT_MEM_FRACTION: "0.1"
+      JAX_ENABLE_X64: "true"
+
+# Algorithm Configuration
+rl_config:
+  algorithm: "PPO" # PPO or SAC
+
   # Environment runners configuration
   env_runners:
     num_env_runners: 8              # Number of parallel environment runners
+
     rollout_fragment_length: 50     # Steps per rollout fragment
-    sample_timeout_s: 1200.0         # Timeout for sampling
-    num_gpus_per_env_runner: 0.6    # GPU allocation per runner
+    sample_timeout_s: 600.0         # Timeout for sampling - set higher with fewer env runners
+    num_gpus_per_env_runner: 0.3     # GPU allocation per runner
 
   # Learner configuration  
   learners:
     num_learners: 1                 # Number of learner workers
-    num_gpus_per_learner: 0.75      # GPU allocation per learner
+    num_gpus_per_learner: 0.75       # GPU allocation per learner
 
   # Training hyperparameters
   training:
-    train_batch_size: 4096          # Total batch size for training
-    minibatch_size: 64              # Size of minibatches for SGD
-    lr: 0.0003                      # Learning rate (3e-4)
+    train_batch_size: 4096 #16384          # Total batch size for training
+    minibatch_size: 2048             # Size of minibatches for SGD
+    num_epochs: 10                   # Number of SGD epochs per training iteration
+    grad_clip: 10.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
+    grad_clip_by: "norm"            # Gradient clipping method
+
+    # PPO-specific config
+    lr: 0.0003                      # Learning rate
     gamma: 0.99                     # Discount factor
     lambda_: 0.95                   # GAE lambda parameter
     clip_param: 0.2                 # PPO clipping parameter
     entropy_coeff: 0.01             # Entropy regularization coefficient
     vf_loss_coeff: 0.5              # Value function loss coefficient
-    num_epochs: 10                  # Number of SGD epochs per training iteration
+    kl_target: 0.01                 # Target size of KL penalty on policy updates
+
+    # SAC-specific config
+    actor_lr: 0.0003
+    critic_lr: 0.0003
+    alpha_lr: 0.0003
+    twin_q: true                   # Whether to use twin Q-networks
+    tau: 0.005                     # Target network update rate
+    initial_alpha: 1.0              # Initial entropy coefficient 
+    target_entropy: "auto"       # Target entropy ("auto" to use default based on action space)
+    n_step: 1                # Number of steps to look ahead for multi-step returns
+    clip_actions: true          # Whether to clip actions to the action space bounds
+    target_network_update_freq: 1  # Frequency of target network updates (in training steps)
+    num_steps_sampled_before_learning_starts: 1000  # Number of steps to sample before starting learning
+    replay_buffer_config: {
+      "type": "MultiAgentPrioritizedEpisodeReplayBuffer",
+      "capacity": 1000000,                        # Replay buffer capacity
+      "alpha": 0.6,                               # Prioritization exponent
+      "beta": 0.4,                                # Importance sampling exponent
+    }
+
 
   # Multi-agent configuration
   multi_agent:
@@ -72,6 +107,10 @@ ppo:
       - "barrier_policy"
     count_steps_by: "agent_steps"
 
+    free_log_std: false         # Whether to predict the std (better exploration) or not (more stable)
+                                # Note this will affect how we extract the log std for logging
+    log_std_bounds: [-10, 2]    # Ranges within which to clip predicted log_std for the policy head
+
 # Resource allocation
 resources:
   num_gpus: 8                       # Total GPUs for the algorithm
@@ -81,46 +120,56 @@ checkpoints:
   save_dir: "./checkpoints"         # Directory to save checkpoints
   upload_best_only: true           # Only upload checkpoints with improved performance
 
+# GIF capture configuration for agent visualization
+gif_capture:
+  enabled: true                     # Enable/disable GIF capture
+  target_agent_type: "plunger"     # Agent type to capture: "plunger" or "barrier"
+  target_agent_index: 1            # Which agent of that type (0-indexed)
+  save_dir: "/tmp/shared_gif_captures"  # Absolute path accessible to both main process and workers
+  fps: 0.5                          # Frame rate for GIFs (slower = easier to see)
+
 # Neural Network Architecture Configuration
 neural_networks:
+  # chosee between SimpleCNN, IMPALA, ViT
   plunger_policy:
     backbone:
-      type: "QuantumCNN"
+      type: "IMPALA"
+      # note custom backbone layers will only be applied for SimplCNN and IMPALA
       conv_layers:
         - {channels: 16, kernel: 4, stride: 2}
         - {channels: 32, kernel: 3, stride: 2}
         - {channels: 64, kernel: 3, stride: 1}
-      feature_size: 256
+      feature_size: 512
       adaptive_pooling: true
       lstm:
-        enabled: true
-        cell_size: 128
-        num_layers: 1
+        enabled: false
+        cell_size: 512
+        num_layers: 2
         max_seq_len: 50
         use_prev_action: true
         use_prev_reward: false
     policy_head:
-      hidden_layers: [128, 64]  
+      hidden_layers: [64, 64]  
       activation: "relu"
-      use_attention: false
+      use_attention: true
     value_head:
-      hidden_layers: [128, 64]
+      hidden_layers: [512, 64]
       activation: "relu"
-      use_attention: false
+      use_attention: true
 
   barrier_policy:
     backbone:
-      type: "QuantumCNN"
+      type: "SimpleCNN"
       conv_layers:
         - {channels: 8, kernel: 3, stride: 1}
-      feature_size: 2
+      feature_size: 128
       adaptive_pooling: true
       # No lstm section = no LSTM for barriers
     policy_head:
-      hidden_layers: [2, 2]  
+      hidden_layers: [32, 32]  
       activation: "relu"
       use_attention: false
     value_head:
-      hidden_layers: [2, 2]
+      hidden_layers: [32, 32]
       activation: "relu"
       use_attention: false

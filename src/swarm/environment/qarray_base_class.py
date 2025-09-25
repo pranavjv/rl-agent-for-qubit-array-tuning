@@ -10,8 +10,6 @@ import matplotlib
 import numpy as np
 import yaml
 from qarray import ChargeSensedDotArray, LatchingModel, TelegraphNoise, WhiteNoise
-
-# need to update qarray_latched with new branch
 from qarray_latched.DotArrays.barrier_voltage_model import BarrierVoltageModel
 from qarray_latched.DotArrays.TunnelCoupledChargeSensed import TunnelCoupledChargeSensed
 from qarray_latched.DotArrays.voltage_dependent_capacitance import (
@@ -22,6 +20,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+from swarm.environment.global_varying_capacitance import (
+    GlobalCapacitanceModel,
+    linear_dependent_update as linear_dependent_capacitance_update_global,
+)
 
 # NOTE: gates are zero indexed but qarray is one indexed
 
@@ -70,8 +73,9 @@ class QarrayBaseClass:
 
         # --- Initialize Model ---
         self.model = self._load_model(param_overrides)
-        self.model.use_sparse = self.config['simulator']['latched_model']['use_sparse']
-        self.model.num_charge_states = self.config['simulator']['latched_model']['num_charge_states']
+
+        # --- Initalise globally varying capacitances ---
+        self.global_capacitance_model = self._init_global_capacitance_model()
 
 
     def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2, barrier_voltages=None):
@@ -149,6 +153,21 @@ class QarrayBaseClass:
                 len(barrier_voltages) == self.num_dots - 1
             ), f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
 
+        # Apply global voltage-dependent capacitances
+        if self.global_capacitance_model is not None:
+            Cgd_updated, Cdd_updated = self.global_capacitance_model.update(gate_voltages, barrier_voltages)
+
+            # not updating sensor couplings
+            Cds_updated = self.model.Cds
+            Cgs_updated = self.model.Cgs
+
+            # not updating barrier capacitances
+            self.model.update_capacitance_matrices(
+                Cdd=Cdd_updated,
+                Cgd=Cgd_updated,
+                Cds=Cds_updated,
+                Cgs=Cgs_updated,
+            )
 
         allgates = list(range(1, self.num_dots + 1))  # Gate numbers for qarray (1-indexed)
         all_z = []
@@ -668,17 +687,17 @@ class QarrayBaseClass:
 
         # Create and set voltage-dependent capacitance model
         vc_params = model_params["voltage_capacitance_parameters"]
-        voltage_capacitance_model = create_linear_capacitance_model(
-            cdd_0=jnp.array(model.cdd_full),
-            cgd_0=jnp.array(model.cgd_full),
-            alpha=vc_params["alpha"],
-            beta=vc_params["beta"],
-        )
 
         capacitance_model_type = self.config["simulator"]["voltage_capacitance_model"]["type"]
         if capacitance_model_type is not None:
             if capacitance_model_type == "linear":
-                model.voltage_capacitance_model = voltage_capacitance_model
+                linear_voltage_capacitance_model = create_linear_capacitance_model(
+                    cdd_0=jnp.array(model.cdd_full),
+                    cgd_0=jnp.array(model.cgd_full),
+                    alpha=vc_params["alpha"],
+                    beta=vc_params["beta"],
+                )
+                model.voltage_capacitance_model = linear_voltage_capacitance_model
             else:
                 raise ValueError(f"Capacitance model type '{capacitance_model_type}' not implemented")
 
@@ -689,6 +708,53 @@ class QarrayBaseClass:
         vgm = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)
 
         self.model.gate_voltage_composer.virtual_gate_matrix = vgm
+
+    
+    def _init_global_capacitance_model(self):
+        if not self.model:
+            raise ValueError("DotArray model must be initialized before setting global capacitance model")
+
+        if isinstance(self.model, TunnelCoupledChargeSensed):
+            Cgd = self.model.cgd_full
+            Cdd = self.model.cdd_full
+
+        else:
+            Cgd = self.model.Cgd
+            Cdd = self.model.Cdd
+
+        base_capacitances = {
+            "Cgd": Cgd,
+            "Cdd": Cdd,
+        }
+
+        if self.use_barriers:
+            vg, vb, _ = self.calculate_ground_truth()
+        else:
+            vg = self.calculate_ground_truth()
+            vb = None
+        
+        ground_truth_dict = {
+            "vg": vg,
+            "vb": vb,
+        }
+
+        global_capacitance_model_type = self.config["simulator"]["global_capacitance_model"]["type"]
+        if global_capacitance_model_type is not None:
+            if global_capacitance_model_type == "linear":
+                global_capacitance_model = GlobalCapacitanceModel(
+                    base_capacitances=base_capacitances,
+                    ground_truth_coords=ground_truth_dict,
+                    update_func=linear_dependent_capacitance_update_global,
+                    alpha=self.config["simulator"]["global_capacitance_model"]["alpha"],
+                    beta=self.config["simulator"]["global_capacitance_model"]["beta"],
+                )
+            else:
+                raise ValueError(f"Global capacitance model type '{global_capacitance_model_type}' not implemented")
+        else:
+            global_capacitance_model = None
+
+        return global_capacitance_model
+
 
     def _render_frame(self, image, path="quantum_dot_plot"):
         """
@@ -796,11 +862,12 @@ class QarrayBaseClass:
 
         return config
 
-    def calculate_ground_truth(self):
+    def calculate_ground_truth(self, debug=False):
         """
         Get the ground truth for the quantum dot array.
         """
         if not self.use_barriers:
+            # calculates virtualised optimal gate voltages
                 
             vg_optimal_physical = self.model.optimal_Vg(self.optimal_VG_center)
             perfect_virtual_matrix = self.model.compute_optimal_virtual_gate_matrix()
@@ -810,7 +877,7 @@ class QarrayBaseClass:
 
             vg_optimal_virtual = vg_optimal_virtual[:-1]
 
-            return vg_optimal_virtual
+            return vg_optimal_virtual, None, None
 
     
         ndot = self.num_dots
@@ -819,7 +886,8 @@ class QarrayBaseClass:
         # cdd = self.model.cdd_full  # Currently unused
         cdd_inv = self.model.cdd_inv_full
 
-        print(f"Cgd: {cgd}")
+        if debug:
+            print(f"Cgd: {cgd}")
 
         numsensor = 1
 
@@ -829,7 +897,9 @@ class QarrayBaseClass:
         # Assumes perfectly virtualised barriers (this is not the case but since ground truth for barriers is approximate we leave this)
         tc_ratio = float(self.optimal_tc) / self.barrier_tc_base
 
-        print(tc_ratio)
+        if debug:
+            print(tc_ratio)
+            
         vb_mag = -np.log(tc_ratio) / self.model.barrier_model.alpha
         vb_optimal = np.full(self.num_barrier_voltages, vb_mag)
 
@@ -847,17 +917,18 @@ class QarrayBaseClass:
             -cdd_inv[:ndot, :ndot] @ cgd[:ndot, :ndot] @ plunger_optimal_physical
         )
 
-        print(f"Original Optimal VG: {self.model.optimal_Vg(self.optimal_VG_center)}")
-        print(f"Plunger optimal virtual: {plunger_optimal_virtual}")
-        print(f"Sensor optimal physical: {sensor_optimal_physical}")
-        print(f"Plunger optimal physical: {plunger_optimal_physical}")
-        print(f"VB optimal: {vb_optimal}")
+        if debug:
+            print(f"Original Optimal VG: {self.model.optimal_Vg(self.optimal_VG_center)}")
+            print(f"Plunger optimal virtual: {plunger_optimal_virtual}")
+            print(f"Sensor optimal physical: {sensor_optimal_physical}")
+            print(f"Plunger optimal physical: {plunger_optimal_physical}")
+            print(f"VB optimal: {vb_optimal}")
 
         return plunger_optimal_virtual, vb_optimal, sensor_optimal_physical
 
 
 if __name__ == "__main__":
-    num_dots = 4
+    num_dots = 2
 
     use_barriers = True
 
@@ -875,6 +946,12 @@ if __name__ == "__main__":
     # os.environ['JAX_PLATFORMS'] = 'cpu'  # Alternative JAX CPU-only setting
     os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 
+    target = [1] * num_dots + [0.5]
+    if use_barriers:
+        vg, vb, _ = experiment.calculate_ground_truth()
+    else:
+        vg = experiment.calculate_ground_truth()
+
     if not use_barriers:
         image = experiment._get_obs([0] * num_dots)["image"][:, :, 0]
     else:
@@ -885,10 +962,17 @@ if __name__ == "__main__":
 
     voltage = - 2.0
 
+    print(experiment.model.Cbg)
+
     if not use_barriers:
-        image = experiment._get_obs([voltage] * num_dots)["image"][:, :, 0]
+        image = experiment._get_obs(vg)["image"][:, :, 0]
     else:
-        image = experiment._get_obs([voltage] * num_dots, [0] * (num_dots - 1))["image"][:, :, 0]
+        vg = np.array(vg)
+        vg += np.random.normal(0, .1, size=vg.shape)
+        vb = np.array(vb)
+        vb += np.random.normal(0, 1, size=vb.shape)
+        vb = np.ones_like(vb) * 10.
+        image = experiment._get_obs(vg, vb)["image"][:, :, 0]
     print(time.time() - start)
 
     experiment._render_frame(image)
