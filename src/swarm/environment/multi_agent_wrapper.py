@@ -39,7 +39,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
     """
 
     def __init__(
-        self, training: bool = True
+        self, training: bool = True, return_voltage: bool = False
     ):
         """
         Initialize multi-agent wrapper.
@@ -47,10 +47,13 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         Automatically infers the array size from the underlying base env
 
         Args:
-            base_env: Base QuantumDeviceEnv instance
+            training: Whether in training mode
+            return_voltage: If True, returns dict observation with image, voltage, and is_plunger.
+                          If False, returns only the image array.
         """
         super().__init__()
 
+        self.return_voltage = return_voltage
         self.base_env = QuantumDeviceEnv(training=training)
 
         self.num_gates = self.base_env.num_dots
@@ -120,37 +123,86 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         self.observation_spaces = {}
         self.action_spaces = {}
 
-        # Gate agents: 2-channel images + single voltage
-        for agent_id in self.gate_agent_ids:
-            self.observation_spaces[agent_id] = spaces.Box(
-                low=0.0,
-                high=1.0,
-                shape=(image_shape[0], image_shape[1], 2),  # 2 channels
-                dtype=np.float32,
-            )
+        if self.return_voltage:
+            # Gate agents: Dict observation with image, voltage, and is_plunger
+            for agent_id in self.gate_agent_ids:
+                self.observation_spaces[agent_id] = spaces.Dict({
+                    'image': spaces.Box(
+                        low=0.0,
+                        high=1.0,
+                        shape=(image_shape[0], image_shape[1], 2),  # 2 channels
+                        dtype=np.float32,
+                    ),
+                    'voltage': spaces.Box(
+                        low=gate_low,
+                        high=gate_high,
+                        shape=(1,),
+                        dtype=np.float32,
+                    ),
+                })
 
-            self.action_spaces[agent_id] = spaces.Box(
-                low=gate_low,
-                high=gate_high,
-                shape=(1,),  # Single voltage output
-                dtype=np.float32,
-            )
+                self.action_spaces[agent_id] = spaces.Box(
+                    low=gate_low,
+                    high=gate_high,
+                    shape=(1,),  # Single voltage output
+                    dtype=np.float32,
+                )
 
-        # Barrier agents: 1-channel images + single voltage
-        for agent_id in self.barrier_agent_ids:
-            self.observation_spaces[agent_id] = spaces.Box(
-                low=0.0,
-                high=1.0,
-                shape=(image_shape[0], image_shape[1], 1),  # 1 channel
-                dtype=np.float32,
-            )
+            # Barrier agents: Dict observation with image, voltage, and is_plunger
+            for agent_id in self.barrier_agent_ids:
+                self.observation_spaces[agent_id] = spaces.Dict({
+                    'image': spaces.Box(
+                        low=0.0,
+                        high=1.0,
+                        shape=(image_shape[0], image_shape[1], 1),  # 1 channel
+                        dtype=np.float32,
+                    ),
+                    'voltage': spaces.Box(
+                        low=barrier_low,
+                        high=barrier_high,
+                        shape=(1,),
+                        dtype=np.float32,
+                    ),
+                })
 
-            self.action_spaces[agent_id] = spaces.Box(
-                low=barrier_low,
-                high=barrier_high,
-                shape=(1,),  # Single voltage output
-                dtype=np.float32,
-            )
+                self.action_spaces[agent_id] = spaces.Box(
+                    low=barrier_low,
+                    high=barrier_high,
+                    shape=(1,),  # Single voltage output
+                    dtype=np.float32,
+                )
+        else:
+            # Gate agents: 2-channel images only
+            for agent_id in self.gate_agent_ids:
+                self.observation_spaces[agent_id] = spaces.Box(
+                    low=0.0,
+                    high=1.0,
+                    shape=(image_shape[0], image_shape[1], 2),  # 2 channels
+                    dtype=np.float32,
+                )
+
+                self.action_spaces[agent_id] = spaces.Box(
+                    low=gate_low,
+                    high=gate_high,
+                    shape=(1,),  # Single voltage output
+                    dtype=np.float32,
+                )
+
+            # Barrier agents: 1-channel images only
+            for agent_id in self.barrier_agent_ids:
+                self.observation_spaces[agent_id] = spaces.Box(
+                    low=0.0,
+                    high=1.0,
+                    shape=(image_shape[0], image_shape[1], 1),  # 1 channel
+                    dtype=np.float32,
+                )
+
+                self.action_spaces[agent_id] = spaces.Box(
+                    low=barrier_low,
+                    high=barrier_high,
+                    shape=(1,),  # Single voltage output
+                    dtype=np.float32,
+                )
 
         self.observation_spaces = spaces.Dict(**self.observation_spaces)
         self.action_spaces = spaces.Dict(**self.action_spaces)
@@ -200,22 +252,24 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             # Barrier agent: 1 channel
             agent_image = global_image[:, :, channels[0] : channels[0] + 1]
 
-        # Get agent's current voltage value (currently unused in image-only mode)
-        if "plunger" in agent_id:
-            # agent_idx = int(agent_id.split("_")[1])
-            # voltage = global_obs["obs_gate_voltages"][agent_idx : agent_idx + 1]
-            pass
-        else:  # barrier agent
-            # agent_idx = int(agent_id.split("_")[1])
-            # voltage = global_obs["obs_barrier_voltages"][agent_idx : agent_idx + 1]
-            pass
+        if self.return_voltage:
+            # Get agent's current voltage value
+            if "plunger" in agent_id:
+                agent_idx = int(agent_id.split("_")[1])
+                voltage = global_obs["obs_gate_voltages"][agent_idx : agent_idx + 1]
+                # is_plunger = np.array([1.0], dtype=np.float32)
+            else:  # barrier agent
+                agent_idx = int(agent_id.split("_")[1])
+                voltage = global_obs["obs_barrier_voltages"][agent_idx : agent_idx + 1]
+                # is_plunger = np.array([0.0], dtype=np.float32)
 
-        # return {
-        #     'image': agent_image.astype(np.float32),
-        #     'voltage': voltage.astype(np.float32)
-        # }
-        # IMAGE ONLY SPACE
-        return agent_image.astype(np.float32)
+            return {
+                'image': agent_image.astype(np.float32),
+                'voltage': voltage.astype(np.float32),
+            }
+        else:
+            # Return image only
+            return agent_image.astype(np.float32)
 
     def _combine_agent_actions(self, agent_actions: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """
@@ -406,9 +460,10 @@ if __name__ == "__main__":
     print("=== Testing Multi-Agent Quantum Wrapper ===")
 
     try:
-        # Create wrapper (no need for separate base_env)
-        wrapper = MultiAgentEnvWrapper(training=True)  # Small test
-        print("✓ Created multi-agent wrapper")
+        # Test image-only mode (return_voltage=False)
+        print("\n--- Testing image-only mode ---")
+        wrapper = MultiAgentEnvWrapper(training=True, return_voltage=False)
+        print("✓ Created multi-agent wrapper (image-only)")
 
         print(f"Agent IDs: {wrapper.get_agent_ids()}")
 
@@ -420,6 +475,7 @@ if __name__ == "__main__":
         for agent_id in wrapper.get_agent_ids()[:2]:  # Check first 2 agents
             agent_obs = obs[agent_id]
             print(f"  {agent_id}:")
+            print(f"    Observation type: {type(agent_obs)}")
             print(f"    Observation shape: {agent_obs.shape}")
 
         # Test step with random actions
@@ -429,10 +485,37 @@ if __name__ == "__main__":
 
         obs, rewards, terminated, truncated, info = wrapper.step(actions)
         print(f"✓ Step successful - got {len(rewards)} agent rewards")
-        print(f"  Sample rewards: {list(rewards.values())[:4]}")
+        wrapper.close()
+
+        # Test dict mode (return_voltage=True)
+        print("\n--- Testing dict observation mode ---")
+        wrapper = MultiAgentEnvWrapper(training=True, return_voltage=True)
+        print("✓ Created multi-agent wrapper (dict mode)")
+
+        # Test reset
+        obs, info = wrapper.reset()
+        print(f"✓ Reset successful - got observations for {len(obs)} agents")
+
+        # Check observation structure
+        for agent_id in wrapper.get_agent_ids()[:2]:  # Check first 2 agents
+            agent_obs = obs[agent_id]
+            print(f"  {agent_id}:")
+            print(f"    Observation type: {type(agent_obs)}")
+            print(f"    Keys: {list(agent_obs.keys())}")
+            print(f"    Image shape: {agent_obs['image'].shape}")
+            print(f"    Voltage shape: {agent_obs['voltage'].shape}")
+            print(f"    Is plunger: {agent_obs['is_plunger']}")
+
+        # Test step with random actions
+        actions = {}
+        for agent_id in wrapper.get_agent_ids():
+            actions[agent_id] = wrapper.action_spaces[agent_id].sample()
+
+        obs, rewards, terminated, truncated, info = wrapper.step(actions)
+        print(f"✓ Step successful - got {len(rewards)} agent rewards")
 
         wrapper.close()
-        print("✓ All tests passed!")
+        print("\n✓ All tests passed!")
 
     except Exception as e:
         print(f"✗ Test failed: {e}")

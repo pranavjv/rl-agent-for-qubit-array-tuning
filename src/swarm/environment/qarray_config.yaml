@@ -27,9 +27,9 @@ simulator:
       # Cross-coupling based on distance between gate and non-primary dots
       cross_coupling:
         # Distance 1: adjacent gate-dot pairs
-        1: {"min": 0., "max": 0.45}
+        1: {"min": 0., "max": 0.}
         # Distance 2: next-adjacent gate-dot pairs
-        2: {"min": 0., "max": 0.35}  
+        2: {"min": 0., "max": 0.35}
         # Distance 3+: long-range gate-dot coupling
         3_plus: {"min": 0., "max": 0.015}
       # Sensor gate coupling to all dots (typically weaker and uniform)

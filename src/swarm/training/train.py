@@ -50,7 +50,7 @@ from swarm.training.utils import (  # noqa: E402
 )
 
 from swarm.voltage_model import create_rl_module_spec
-
+from swarm.training.utils.custom_ppo_learner import PPOLearnerWithValueStats # for logging
 
 def parse_config_overrides(unknown_args):
     """Parse config override arguments in the format --key.subkey value or --key=value (allows dynamically overriding settings when calling train.py)"""
@@ -260,7 +260,8 @@ def create_env(config=None):
     from swarm.environment.multi_agent_wrapper import MultiAgentEnvWrapper
 
     # Wrap in multi-agent wrapper (config unused but required by RLlib)
-    return MultiAgentEnvWrapper()
+    # need return_voltage=True if we are using deltas + LSTM
+    return MultiAgentEnvWrapper(return_voltage=True)
 
 
 def create_env_to_module_connector(env, spaces, device, use_deltas):
@@ -404,9 +405,9 @@ def main():
         else:
             raise ValueError(f"Unsupported algorithm: {algo}")
 
-        # Handle action parsing to memory manually
-        # use_deltas = env_instance.base_env.use_deltas
-        # env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
+        # Handle voltage parsing to memory manually
+        use_deltas = env_instance.base_env.use_deltas
+        env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
 
         algo_config = (
             algo_config_builder()
@@ -427,8 +428,8 @@ def main():
                 rollout_fragment_length=config['rl_config']['env_runners']['rollout_fragment_length'],
                 sample_timeout_s=config['rl_config']['env_runners']['sample_timeout_s'],
                 num_gpus_per_env_runner=config['rl_config']['env_runners']['num_gpus_per_env_runner'],
-                # env_to_module_connector=env_to_module_connector,
-                # add_default_connectors_to_env_to_module_pipeline=True,  # Let Ray handle defaults
+                env_to_module_connector=env_to_module_connector,
+                add_default_connectors_to_env_to_module_pipeline=True,  # Let Ray handle defaults
             )
             .learners(
                 num_learners=config['rl_config']['learners']['num_learners'], 
@@ -440,6 +441,7 @@ def main():
                 num_epochs=config['rl_config']['training']['num_epochs'],
                 grad_clip=config['rl_config']['training']['grad_clip'],
                 grad_clip_by=config['rl_config']['training']['grad_clip_by'],
+                learner_class=PPOLearnerWithValueStats if algo == "ppo" else None,
                 **train_config,
             )
             .resources(num_gpus=config['resources']['num_gpus'])

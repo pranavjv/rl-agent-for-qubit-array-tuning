@@ -88,16 +88,17 @@ class SimpleCNN(TorchModel, Encoder):
         return self._output_dims
     
     def _forward(self, inputs, **kwargs):
+        if isinstance(inputs, dict) and "obs" in inputs:
+            inputs = inputs["obs"]
+        
         if isinstance(inputs, dict):
-            if "obs" in inputs:
-                x = inputs["obs"]
-            elif len(inputs) == 1:
-                x = next(iter(inputs.values()))
+            if "image" in inputs:
+                x = inputs["image"]
             else:
                 raise ValueError(f"Unexpected input dict structure: {list(inputs.keys())}")
         else:
             x = inputs
-        
+
         if x.dim() == 3:
             x = x.unsqueeze(0)
         
@@ -279,11 +280,12 @@ class IMPALA(TorchModel, Encoder):
         return self._output_dims
     
     def _forward(self, inputs, **kwargs):
+        if isinstance(inputs, dict) and "obs" in inputs:
+            inputs = inputs["obs"]
+        
         if isinstance(inputs, dict):
-            if "obs" in inputs:
-                x = inputs["obs"]
-            elif len(inputs) == 1:
-                x = next(iter(inputs.values()))
+            if "image" in inputs:
+                x = inputs["image"]
             else:
                 raise ValueError(f"Unexpected input dict structure: {list(inputs.keys())}")
         else:

@@ -34,6 +34,27 @@ for path in [environment_dir, swarm_dir, project_root]:
     if path not in sys.path:
         sys.path.insert(0, path)
 
+
+@dataclass
+class GenerationConfig:
+    """Configuration for dataset generation"""
+    total_samples: int
+    num_dots: int
+    use_barriers: bool
+    output_dir: str
+    gpu_ids: str
+    config_path: str = '../environment/qarray_config.yaml'
+    resolution: int = 128
+    batch_size: int = 1000
+    min_voltage_offset_range: float = -2.0
+    max_voltage_offset_range: float = 0.05
+    min_barrier_offset_range: float = -3.0
+    max_barrier_offset_range: float = -1.0
+    seed_base: int = 42
+    min_obs_voltage_size: float = 0.5 # allows adjustable random window width, set equal to give fixed values
+    max_obs_voltage_size: float = 1.5 #
+
+
 def load_ray_config(config_path: str = None) -> Dict[str, Any]:
     """Load Ray configuration from YAML file."""
     if config_path is None:
@@ -45,21 +66,6 @@ def load_ray_config(config_path: str = None) -> Dict[str, Any]:
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-@dataclass
-class GenerationConfig:
-    """Configuration for dataset generation"""
-    total_samples: int
-    num_dots: int
-    use_barriers: bool
-    output_dir: str
-    config_path: str
-    gpu_ids: str
-    batch_size: int = 1000
-    voltage_offset_range: float = 0.1
-    barrier_offset_range: float = 5.0
-    seed_base: int = 42
-    min_obs_voltage_size: float = 0.5 # allows adjustable random window width, set equal to give fixed values
-    max_obs_voltage_size: float = 1.5 #
 
 def enforce_cuda_availability(gpu_ids_str: str) -> List[int]:
     """Enforce CUDA is available for specified GPUs, return GPU list"""
@@ -147,7 +153,7 @@ class QarrayWorkerActor:
                 config_path=self.config.config_path,
                 obs_voltage_min=-obs_voltage_size,
                 obs_voltage_max=obs_voltage_size,
-                obs_image_size=128
+                obs_image_size=self.config.resolution
             )
             
             # Get ground truth voltages
@@ -156,16 +162,16 @@ class QarrayWorkerActor:
             # Add random offset to ground truth for observation
             rng = np.random.default_rng(self.config.seed_base + sample_id)
             voltage_offset = rng.uniform(
-                -self.config.voltage_offset_range, 
-                self.config.voltage_offset_range, 
+                self.config.min_voltage_offset_range, 
+                self.config.max_voltage_offset_range, 
                 size=len(gt_voltages)
             )
             gate_voltages = gt_voltages + voltage_offset
 
             if use_barriers:
                 barrier_offset = rng.uniform(
-                    -self.config.barrier_offset_range,
-                    self.config.barrier_offset_range,
+                    self.config.min_barrier_offset_range,
+                    self.config.max_barrier_offset_range,
                     size=len(vb_optimal)
                 )
 
@@ -314,8 +320,10 @@ def run_test_mode(config: GenerationConfig, ray_config_path: str = None) -> None
             'config_path': config.config_path,
             'gpu_ids': config.gpu_ids,
             'batch_size': config.batch_size,
-            'voltage_offset_range': config.voltage_offset_range,
-            'barrier_offset_range': config.barrier_offset_range,
+            'min_voltage_offset_range': config.min_voltage_offset_range,
+            'max_voltage_offset_range': config.max_voltage_offset_range,
+            'min_barrier_offset_range': config.min_barrier_offset_range,
+            'max_barrier_offset_range': config.max_barrier_offset_range,
             'seed_base': config.seed_base,
             'min_obs_voltage_size': config.min_obs_voltage_size,
             'max_obs_voltage_size': config.max_obs_voltage_size
@@ -431,7 +439,8 @@ def save_metadata(config: GenerationConfig, output_dir: Path,
             'batch_size': config.batch_size,
             'num_dots': config.num_dots,
             'gpu_ids': config.gpu_ids,
-            'voltage_offset_range': config.voltage_offset_range,
+            'min_voltage_offset_range': config.min_voltage_offset_range,
+            'max_voltage_offset_range': config.max_voltage_offset_range,
             'seed_base': config.seed_base
         },
         'generation_stats': generation_stats,
@@ -505,8 +514,10 @@ def generate_dataset(config: GenerationConfig, ray_config_path: str = None) -> N
             'config_path': config.config_path,
             'gpu_ids': config.gpu_ids,
             'batch_size': config.batch_size,
-            'voltage_offset_range': config.voltage_offset_range,
-            'barrier_offset_range': config.barrier_offset_range,
+            'min_voltage_offset_range': config.min_voltage_offset_range,
+            'max_voltage_offset_range': config.max_voltage_offset_range,
+            'min_barrier_offset_range': config.min_barrier_offset_range,
+            'max_barrier_offset_range': config.max_barrier_offset_range,
             'seed_base': config.seed_base,
             'min_obs_voltage_size': config.min_obs_voltage_size,
             'max_obs_voltage_size': config.max_obs_voltage_size
@@ -689,7 +700,7 @@ def main():
     parser = argparse.ArgumentParser(description='Generate quantum device dataset using Ray Actors')
     parser.add_argument('--total_samples', type=int, default=10000,
                        help='Total number of samples to generate')
-    parser.add_argument('--num_dots', type=int, default=8,
+    parser.add_argument('--num_dots', type=int, default=4,
                        help='Number of quantum dots')
     parser.add_argument('--use_barriers', action='store_true',
                        help='Whether to use barrier gates in the model')
@@ -697,14 +708,6 @@ def main():
                        help='Number of samples per batch file')
     parser.add_argument('--output_dir', type=str, default='./dataset',
                        help='Output directory for dataset')
-    parser.add_argument('--config_path', type=str, default='qarray_config.yaml',
-                       help='Path to qarray configuration file')
-    parser.add_argument('--voltage_offset_range', type=float, default=0.1,
-                       help='Range for random voltage offset from ground truth')
-    parser.add_argument('--min_obs_voltage_size', type=float, default=0.5,
-                       help='Minimum observation voltage window size (symmetric around 0)')
-    parser.add_argument('--max_obs_voltage_size', type=float, default=1.5,
-                       help='Maximum observation voltage window size (symmetric around 0)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Base random seed for reproducibility')
     parser.add_argument('--gpu_ids', type=str, default="7",
@@ -728,13 +731,9 @@ def main():
         num_dots=args.num_dots,
         use_barriers=args.use_barriers,
         output_dir=args.output_dir,
-        config_path=args.config_path,
         gpu_ids=args.gpu_ids,
         batch_size=args.batch_size,
-        voltage_offset_range=args.voltage_offset_range,
-        seed_base=args.seed,
-        min_obs_voltage_size=args.min_obs_voltage_size,
-        max_obs_voltage_size=args.max_obs_voltage_size
+        seed_base=args.seed
     )
     
     # Run dataset generation
