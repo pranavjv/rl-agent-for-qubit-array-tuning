@@ -44,9 +44,7 @@ from swarm.training.utils import (  # noqa: E402
     print_training_progress,
     setup_wandb_metrics,
     upload_checkpoint_artifact,
-    log_scans_to_wandb,
     policy_mapping_fn,
-    CustomCallbacks,
     cleanup_gif_lock_file,
     process_and_log_gifs,
 )
