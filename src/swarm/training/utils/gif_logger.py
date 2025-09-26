@@ -55,10 +55,11 @@ def process_episode_gif(result, iteration):
         # Don't raise to avoid disrupting training
 
 
-def cleanup_gif_lock_file():
-    """Remove gif capture lock file from previous training runs."""
+def cleanup_gif_lock_file(gif_save_dir=None):
+    """Remove gif capture lock file and images from previous training runs."""
     import os
 
+    # Clean up lock file
     lock_file = "/tmp/gif_capture_worker.lock"
     try:
         os.remove(lock_file)
@@ -67,6 +68,16 @@ def cleanup_gif_lock_file():
         pass  # Already gone, that's fine
     except Exception as e:
         print(f"Warning: Could not remove GIF lock file: {e}")
+
+    # Clean up previous GIF images if directory is specified
+    if gif_save_dir is not None:
+        try:
+            gif_dir = Path(gif_save_dir)
+            if gif_dir.exists():
+                shutil.rmtree(gif_dir, ignore_errors=True)
+                print(f"Cleaned up previous GIF images from {gif_dir}")
+        except Exception as e:
+            print(f"Warning: Could not remove previous GIF images: {e}")
 
 
 def process_and_log_gifs(iteration_num, config, use_wandb=True):
