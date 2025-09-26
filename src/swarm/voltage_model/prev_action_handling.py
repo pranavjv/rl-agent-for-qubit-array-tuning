@@ -1,6 +1,6 @@
 """
 Handles the previous action processing prior to LSTM embedding
-to work around using deltas
+to work around using deltas (note this will not change how we handle barriers)
 """
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.utils.annotations import override
@@ -23,22 +23,6 @@ class CustomPrevActionHandling(ConnectorV2):
     # ):
     #     super().__init__(input_observation_space, input_action_space, **kwargs)
 
-    #     assert delta_max > delta_min
-    #     self.delta_min = delta_min
-    #     self.delta_max = delta_max
-
-    #     # these are the same min and max that are used in env, prior to adding an offset
-    #     assert obs_voltage_max > obs_voltage_min
-    #     self.obs_voltage_min = obs_voltage_min
-    #     self.obs_voltage_max = obs_voltage_max
-
-    # def _rescale_action(self, action, _min=-1.0, _max=1.0):
-    #     assert _max > _min
-    #     action = (action - _min) / (_max - _min) # rescale to [0, 1]
-    #     action = action * (self.delta_max - self.delta_min) + self.delta_min
-    #     return action
-
-
     @override(ConnectorV2)
     def __call__(
         self,
@@ -57,41 +41,25 @@ class CustomPrevActionHandling(ConnectorV2):
                 episodes, agents_that_stepped_only=True
             ):
 
-                agent_id = sa_episode.agent_id
-                is_plunger = agent_id is not None and "plunger" in agent_id
+                # agent_id = sa_episode.agent_id
+                # is_plunger = agent_id is not None and "plunger" in agent_id
                 
-                if is_plunger:
-                    current_obs = sa_episode.get_observations(-1)
+                # set state to previous obs for both plunger and barrier voltages
+                current_obs = sa_episode.get_observations(-1)
 
-                    if isinstance(current_obs, dict) and "obs" in current_obs:
-                        current_obs = current_obs["obs"]
+                if "obs" in current_obs:
+                    # Ray may package obs into a dict
+                    current_obs = current_obs["obs"]
 
-                    obs_gate_voltages = current_obs["voltage"]
-                    # already normalised in [-1, 1]
-                    
-                    # NOTE: we do not need to add the actions at all, the last observation is our last 'action'
-                    # current_offset = current_obs["offset"]
-                    # last_action = sa_episode.get_actions(-1)
-                    # last_action = self._rescale_action(last_action)
-                    # absolute_action = np.array(last_action) + obs_gate_voltages
-                    # absolute_action = np.clip(absolute_action, self.obs_voltage_min + current_offset, self.obs_voltage_max + current_offset) # ensure we are within bounds
-                            
-                    self.add_batch_item(
-                        batch,
-                        SampleBatch.PREV_ACTIONS,
-                        item_to_add=obs_gate_voltages,
-                        single_agent_episode=sa_episode,
-                    )
-                else:
-                    last_action = sa_episode.get_actions(-1, fill=0.0)
-                    # could update the fill value to a more realistic one (eg. use the initialisation)
-                    
-                    self.add_batch_item(
-                        batch,
-                        SampleBatch.PREV_ACTIONS,
-                        item_to_add=last_action,
-                        single_agent_episode=sa_episode,
-                    )
+                obs_voltage = current_obs["voltage"]
+                # already normalised to [-1, 1] range
+
+                self.add_batch_item(
+                    batch,
+                    SampleBatch.PREV_ACTIONS,
+                    item_to_add=obs_voltage,
+                    single_agent_episode=sa_episode,
+                )
 
             return batch
             
