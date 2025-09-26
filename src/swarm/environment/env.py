@@ -60,6 +60,10 @@ class QuantumDeviceEnv(gym.Env):
         self.barrier_min = None
         self.window_delta = None #size of scan region
 
+        delta_max = self.config['simulator']['delta_max']
+        self.plunger_delta_max = delta_max
+        self.plunger_delta_min = -delta_max
+
         #reward parameters
         self.plunger_reward_window_size = self.config["reward"]["plunger_reward_window_size"]
         self.barrier_reward_window_size = self.config["reward"]["barrier_reward_window_size"]
@@ -217,13 +221,13 @@ class QuantumDeviceEnv(gym.Env):
         barrier_voltages = np.array(barrier_voltages).flatten().astype(np.float32)
         
         # Rescale voltages from [-1, 1] to actual ranges
-        gate_voltages = self._rescale_voltages(gate_voltages, self.plunger_min, self.plunger_max)
-        barrier_voltages = self._rescale_voltages(barrier_voltages, self.barrier_min, self.barrier_max)
+        gate_voltages = self._rescale_gate_voltages(gate_voltages)
+        barrier_voltages = self._rescale_barrier_voltages(barrier_voltages)
             
         self.device_state["current_gate_voltages"] = gate_voltages
         self.device_state["current_barrier_voltages"] = barrier_voltages
 
-        reward, at_target = self._get_reward()
+        reward = self._get_reward()
         terminated = truncated = False
 
         if self.current_step >= self.max_steps:
@@ -245,7 +249,7 @@ class QuantumDeviceEnv(gym.Env):
             terminated,
             truncated,
             info,
-        )  # note we are returning reward as a dict of lists (one reward per agent)
+        )
 
     def _get_reward(self):
         """
@@ -282,7 +286,7 @@ class QuantumDeviceEnv(gym.Env):
 
         rewards = {"gates": gate_rewards, "barriers": barrier_rewards}
 
-        return rewards, at_target
+        return rewards
 
     def _get_info(self):
         return {
@@ -590,10 +594,22 @@ class QuantumDeviceEnv(gym.Env):
 
         return plunger_centers, barrier_centers  
 
-    def _rescale_voltages(self, voltages, target_min, target_max, source_min=-1, source_max=1):
-        voltages = (voltages - source_min) / (source_max - source_min)
-        voltages = voltages * (target_max - target_min) + target_min
-        return voltages
+    def _rescale_gate_voltages(self, obs):
+        obs = (obs + 1) / 2 # [0, 1]
+
+        if self.use_deltas:
+            obs = obs * (self.plunger_delta_max - self.plunger_delta_min) + self.plunger_delta_min
+            obs += self.device_state["current_gate_voltages"]
+            obs = np.clip(obs, self.plunger_min, self.plunger_max)
+        else:
+            obs = obs * (self.plunger_max - self.plunger_min) + self.plunger_min
+
+        return obs
+
+    def _rescale_barrier_voltages(self, obs):
+        obs = (obs + 1) / 2 # [0, 1]
+        obs = obs * (self.barrier_max - self.barrier_min) + self.barrier_min
+        return obs
 
 
     def _load_config(self, config_path):
