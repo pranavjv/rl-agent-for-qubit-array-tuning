@@ -1,6 +1,6 @@
 """
 Handles the previous action processing prior to LSTM embedding
-to work around using deltas
+to work around using deltas (note this will not change how we handle barriers)
 """
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.utils.annotations import override
@@ -41,34 +41,25 @@ class CustomPrevActionHandling(ConnectorV2):
                 episodes, agents_that_stepped_only=True
             ):
 
-                agent_id = sa_episode.agent_id
-                is_plunger = agent_id is not None and "plunger" in agent_id
+                # agent_id = sa_episode.agent_id
+                # is_plunger = agent_id is not None and "plunger" in agent_id
                 
-                if is_plunger:
-                    current_obs = sa_episode.get_observations(-1)
+                # set state to previous obs for both plunger and barrier voltages
+                current_obs = sa_episode.get_observations(-1)
 
-                    if isinstance(current_obs, dict) and "obs" in current_obs:
-                        current_obs = current_obs["obs"]
+                if "obs" in current_obs:
+                    # Ray may package obs into a dict
+                    current_obs = current_obs["obs"]
 
-                    obs_gate_voltages = current_obs["voltage"]
-                    # already normalised to [-1, 1] range
+                obs_voltage = current_obs["voltage"]
+                # already normalised to [-1, 1] range
 
-                    self.add_batch_item(
-                        batch,
-                        SampleBatch.PREV_ACTIONS,
-                        item_to_add=obs_gate_voltages,
-                        single_agent_episode=sa_episode,
-                    )
-                else:
-                    last_action = sa_episode.get_actions(-1, fill=0.0)
-                    # could update the fill value to a more realistic one (eg. use the initialisation)
-                    
-                    self.add_batch_item(
-                        batch,
-                        SampleBatch.PREV_ACTIONS,
-                        item_to_add=last_action,
-                        single_agent_episode=sa_episode,
-                    )
+                self.add_batch_item(
+                    batch,
+                    SampleBatch.PREV_ACTIONS,
+                    item_to_add=obs_voltage,
+                    single_agent_episode=sa_episode,
+                )
 
             return batch
             
