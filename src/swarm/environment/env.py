@@ -160,13 +160,14 @@ class QuantumDeviceEnv(gym.Env):
 
         plunger_ground_truth, barrier_ground_truth, _ = self.array.calculate_ground_truth()
 
-        self._init_voltages(barrier_ground_truth)
-
-        plungers, barriers = self._starting_voltages()
-
         if barrier_ground_truth is None:
             assert not self.use_barriers, "Expected array for barrier_ground_truth, got None"
             barrier_ground_truth = np.zeros(self.num_barrier_voltages, dtype=np.float32)
+
+        self._init_voltage_ranges(barrier_ground_truth)
+
+        plungers, barriers = self._starting_voltages()
+
 
         self.device_state = {
             "gate_ground_truth": plunger_ground_truth,
@@ -535,6 +536,7 @@ class QuantumDeviceEnv(gym.Env):
             self.capacitance_model = None
 
     def _init_voltage_ranges(self, barrier_ground_truths):
+
         #NOTE: This assumes plunger ground truths are close to -1V
 
         full_plunger_range_width = self.config['simulator']['full_plunger_range_width']
@@ -557,23 +559,19 @@ class QuantumDeviceEnv(gym.Env):
         self.plunger_min = plunger_center - 0.5 * plunger_range
 
         
-        if barrier_ground_truths is not None:
-            barrier_range = np.random.uniform(
-                low=full_barrier_range_width['min'],
-                high=full_barrier_range_width['max']
-            )
+        barrier_range = np.random.uniform(
+            low=full_barrier_range_width['min'],
+            high=full_barrier_range_width['max']
+        )
 
-            #ground truth always falls no closer than 0.5V from edge of window
-            barrier_center = np.random.uniform(
+        barrier_center = np.random.uniform(
                 low=barrier_ground_truths - 0.5 * (barrier_range-1),
                 high=barrier_ground_truths + 0.5 * (barrier_range-1),
             )
 
-            self.barrier_max = barrier_center + 0.5 * barrier_range
-            self.barrier_min = barrier_center - 0.5 * barrier_range
-        else:
-            self.barrier_max = None
-            self.barrier_min = None
+        self.barrier_max = barrier_center + 0.5 * barrier_range
+        self.barrier_min = barrier_center - 0.5 * barrier_range
+
 
     def _starting_voltages(self):
         plunger_centers = np.random.uniform(
@@ -589,7 +587,7 @@ class QuantumDeviceEnv(gym.Env):
                 size=self.num_barrier_voltages
             ) 
         else:
-            barrier_centers = np.zeros(self.num_barriers)
+            barrier_centers = np.zeros(self.num_barrier_voltages)
 
         return plunger_centers, barrier_centers  
 
