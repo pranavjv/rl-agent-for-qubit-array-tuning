@@ -248,12 +248,12 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
                 agent_image = np.stack([img1, img2], axis=2)
             elif agent_idx == self.num_gates - 1:
                 # Final agent: flip both images
-                img1 = np.transpose(img1, (1, 0, 2))
-                img2 = np.transpose(img2, (1, 0, 2))
+                img1 = np.transpose(img1, (1, 0))
+                img2 = np.transpose(img2, (1, 0))
                 agent_image = np.stack([img1, img2], axis=2)
             else:
                 # Middle agents: flip only second image
-                img2 = np.transpose(img2, (1, 0, 2))
+                img2 = np.transpose(img2, (1, 0))
                 agent_image = np.stack([img1, img2], axis=2)
         else:
             # Barrier agent: 1 channel

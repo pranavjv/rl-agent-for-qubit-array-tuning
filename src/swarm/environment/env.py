@@ -60,9 +60,6 @@ class QuantumDeviceEnv(gym.Env):
         self.barrier_min = None
         self.window_delta = None #size of scan region
 
-        # capacitance model parameters
-        self.update_method = self.config['capacitance_model']['update_method']
-
         #reward parameters
         self.plunger_reward_window_size = self.config["reward"]["plunger_reward_window_size"]
         self.barrier_reward_window_size = self.config["reward"]["barrier_reward_window_size"]
