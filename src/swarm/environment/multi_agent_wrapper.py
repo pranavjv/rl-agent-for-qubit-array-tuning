@@ -39,7 +39,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
     """
 
     def __init__(
-        self, training: bool = True, return_voltage: bool = False
+        self, training: bool = True, return_voltage: bool = False, gif_config: dict = None,
     ):
         """
         Initialize multi-agent wrapper.
@@ -55,7 +55,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
 
 
         self.return_voltage = return_voltage
-  
+        
+        self.gif_config = gif_config
         self._init_gif_capture()
 
         self.base_env = QuantumDeviceEnv(training=training)
@@ -461,18 +462,17 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
 
         # GIF capture state
         self.should_capture_gifs = False
-        self.gif_config = None
         self.gif_step_count = 0
 
         # Check if we're the selected worker for GIF capture
         if self._is_first_env_runner():
             # Load gif capture config from environment variables (set by Ray runtime_env)
-            self.gif_config = {
-                "enabled": os.getenv("GIF_CAPTURE_ENABLED", "false").lower() == "true",
-                "target_agent_type": os.getenv("GIF_CAPTURE_AGENT_TYPE", "plunger"),
-                "target_agent_index": int(os.getenv("GIF_CAPTURE_AGENT_INDEX", "1")),
-                "save_dir": os.getenv("GIF_CAPTURE_SAVE_DIR", "./gif_captures")
-            }
+            # self.gif_config = {
+            #     "enabled": os.getenv("GIF_CAPTURE_ENABLED", "false").lower() == "true",
+            #     "target_agent_type": os.getenv("GIF_CAPTURE_AGENT_TYPE", "plunger"),
+            #     "target_agent_index": int(os.getenv("GIF_CAPTURE_AGENT_INDEX", "1")),
+            #     "save_dir": os.getenv("GIF_CAPTURE_SAVE_DIR", "./gif_captures")
+            # }
 
             if self.gif_config["enabled"]:
                 self.should_capture_gifs = True
@@ -502,11 +502,12 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             with os.fdopen(lock_fd, 'w') as f:
                 f.write(str(os.getpid()))
                 f.flush()
-
+            print("Race Won")
             return True
 
         except OSError:
             # File already exists - another worker got there first
+            print("Race Lost")
             return False
 
     def _is_env_runner_worker(self):

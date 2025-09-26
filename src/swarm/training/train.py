@@ -240,7 +240,7 @@ def parse_arguments():
 
 
 
-def create_env(config=None):
+def create_env(config=None, gif_config=None):
     """Create multi-agent quantum environment with JAX safety."""
     import os
     import jax
@@ -249,6 +249,8 @@ def create_env(config=None):
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.1")
     os.environ.setdefault("JAX_ENABLE_X64", "true")
+
+    assert gif_config is not None
     
     # Try to clear any existing JAX state
     try:
@@ -261,7 +263,7 @@ def create_env(config=None):
 
     # Wrap in multi-agent wrapper (config unused but required by RLlib)
     # need return_voltage=True if we are using deltas + LSTM
-    return MultiAgentEnvWrapper(return_voltage=True)
+    return MultiAgentEnvWrapper(return_voltage=True, gif_config=gif_config)
 
 
 def create_env_to_module_connector(env, spaces, device, use_deltas):
@@ -335,8 +337,11 @@ def main():
     ray.init(**ray_config)
 
     try:
-        register_env("qarray_multiagent_env", create_env)
-        env_instance = create_env()
+        gif_config = config["gif_config"]
+
+        create_env_fn = partial(create_env, gif_config=gif_config)
+        register_env("qarray_multiagent_env", create_env_fn)
+        env_instance = create_env_fn()
 
         # Extract environment config and merge with training config for wandb
         if use_wandb:
@@ -565,7 +570,7 @@ def main():
             log_to_wandb(result, i)
 
             # Process and log GIFs if enabled
-            if config['gif_capture']['enabled'] and use_wandb:
+            if config['gif_config']['enabled'] and use_wandb:
                 process_and_log_gifs(i + 1, config, use_wandb)
 
             # Save checkpoint using modern RLlib API

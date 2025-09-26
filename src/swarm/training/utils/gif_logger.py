@@ -82,9 +82,10 @@ def cleanup_gif_lock_file(gif_save_dir=None):
 
 def process_and_log_gifs(iteration_num, config, use_wandb=True):
     """Process saved images into GIFs and log to Wandb."""
-    gif_save_dir = Path(config['gif_capture']['save_dir'])
+    gif_save_dir = Path(config['gif_config']['save_dir'])
 
     if not gif_save_dir.exists() or not any(gif_save_dir.glob("step_*.png")):
+        print("No image dir found for gif creation")
         return
 
     try:
@@ -128,7 +129,7 @@ def _log_images_as_video_to_wandb(channel_files, iteration_num, config):
         from PIL import Image
 
         log_dict = {}
-        fps = config['gif_capture'].get('fps', 0.5)  # Default to 0.5 if not specified
+        fps = config['gif_config'].get('fps', 0.5)  # Default to 0.5 if not specified
 
         for channel, files in channel_files.items():
             if not files:

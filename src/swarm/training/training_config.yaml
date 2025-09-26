@@ -15,8 +15,8 @@ wandb:
 # Ray cluster configuration
 ray:
   include_dashboard: false   # Disable Ray dashboard for cleaner output
-  log_to_driver: false       # Reduce driver logs
-  logging_level: 30         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
+  log_to_driver: true       # Reduce driver logs
+  logging_level: 10         # WARNING level (10=DEBUG, 20=INFO, 30=WARNING, 40=ERROR)
   
   # Runtime environment settings
   runtime_env:
@@ -121,7 +121,7 @@ checkpoints:
   upload_best_only: true           # Only upload checkpoints with improved performance
 
 # GIF capture configuration for agent visualization
-gif_capture:
+gif_config:
   enabled: true                     # Enable/disable GIF capture
   target_agent_type: "plunger"     # Agent type to capture: "plunger" or "barrier"
   target_agent_index: 1            # Which agent of that type (0-indexed)
