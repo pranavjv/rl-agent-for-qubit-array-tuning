@@ -23,22 +23,6 @@ class CustomPrevActionHandling(ConnectorV2):
     # ):
     #     super().__init__(input_observation_space, input_action_space, **kwargs)
 
-    #     assert delta_max > delta_min
-    #     self.delta_min = delta_min
-    #     self.delta_max = delta_max
-
-    #     # these are the same min and max that are used in env, prior to adding an offset
-    #     assert obs_voltage_max > obs_voltage_min
-    #     self.obs_voltage_min = obs_voltage_min
-    #     self.obs_voltage_max = obs_voltage_max
-
-    # def _rescale_action(self, action, _min=-1.0, _max=1.0):
-    #     assert _max > _min
-    #     action = (action - _min) / (_max - _min) # rescale to [0, 1]
-    #     action = action * (self.delta_max - self.delta_min) + self.delta_min
-    #     return action
-
-
     @override(ConnectorV2)
     def __call__(
         self,
@@ -67,15 +51,8 @@ class CustomPrevActionHandling(ConnectorV2):
                         current_obs = current_obs["obs"]
 
                     obs_gate_voltages = current_obs["voltage"]
-                    # already normalised in [-1, 1]
-                    
-                    # NOTE: we do not need to add the actions at all, the last observation is our last 'action'
-                    # current_offset = current_obs["offset"]
-                    # last_action = sa_episode.get_actions(-1)
-                    # last_action = self._rescale_action(last_action)
-                    # absolute_action = np.array(last_action) + obs_gate_voltages
-                    # absolute_action = np.clip(absolute_action, self.obs_voltage_min + current_offset, self.obs_voltage_max + current_offset) # ensure we are within bounds
-                            
+                    # already normalised to [-1, 1] range
+
                     self.add_batch_item(
                         batch,
                         SampleBatch.PREV_ACTIONS,
