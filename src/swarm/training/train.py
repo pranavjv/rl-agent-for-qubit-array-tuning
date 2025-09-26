@@ -288,10 +288,10 @@ def create_env_to_module_connector(env, spaces, device, use_deltas):
 def load_config():
     """Load training configuration from YAML file."""
     config_path = Path(__file__).parent / "training_config.yaml"
-
+    
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-
+    
     return config
 
 
@@ -315,15 +315,8 @@ def main():
             entity=config['wandb']['entity'], 
             project=config['wandb']['project']
         )
-        # Log the final config (with command line overrides) to wandb
-        wandb.config.update(config)
+        # Note: We'll update wandb config with merged config later after env creation
         setup_wandb_metrics(config['wandb']['ema_period'])
-        
-        # Log the training config as an artifact
-        config_artifact = wandb.Artifact("training_config", type="config", metadata=config)
-        config_path = Path(__file__).parent / "training_config.yaml"
-        config_artifact.add_file(str(config_path), "training_config.yaml")
-        wandb.log_artifact(config_artifact)
 
     # Initialize Ray with runtime environment from config
     ray_config = {
@@ -336,11 +329,6 @@ def main():
             "env_vars": {
                 **config['ray']['runtime_env']['env_vars'],
                 "SWARM_PROJECT_ROOT": str(project_root),
-                # GIF capture configuration
-                "GIF_CAPTURE_ENABLED": str(config['gif_capture']['enabled']),
-                "GIF_CAPTURE_AGENT_TYPE": config['gif_capture']['target_agent_type'],
-                "GIF_CAPTURE_AGENT_INDEX": str(config['gif_capture']['target_agent_index']),
-                "GIF_CAPTURE_SAVE_DIR": config['gif_capture']['save_dir'],
             },
         },
     }
@@ -352,10 +340,31 @@ def main():
         register_env("qarray_multiagent_env", create_env)
         env_instance = create_env()
 
-        # Log environment config to wandb
+        # Extract environment config and merge with training config for wandb
         if use_wandb:
             env_config = env_instance.base_env.config
-            wandb.config.update({"env_config": env_config})
+            
+            # Create a copy of the training config and merge with env config
+            import copy
+            merged_config = copy.deepcopy(config)
+            merged_config['env_config'] = env_config
+            
+            # Update wandb config with the merged config
+            wandb.config.update(merged_config)
+            
+            # Save the merged config as a file artifact
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp_file:
+                yaml.dump(merged_config, tmp_file, default_flow_style=False, sort_keys=False)
+                merged_config_path = tmp_file.name
+            
+            # Log the complete merged config as an artifact
+            merged_config_artifact = wandb.Artifact("full_training_config", type="config", metadata=merged_config)
+            merged_config_artifact.add_file(merged_config_path, "full_training_config.yaml")
+            wandb.log_artifact(merged_config_artifact)
+            
+            # Clean up temporary file
+            os.unlink(merged_config_path)
 
         # Optionally update the rl module config to allow log_std clamping, shared log_std vector etc.
         rl_module_config = {
@@ -543,6 +552,7 @@ def main():
 
         # Clean up any previous GIF capture lock files
         cleanup_gif_lock_file()
+
 
         training_start_time = time.time()
         best_reward = float("-inf")  # Track best performance for artifact upload
