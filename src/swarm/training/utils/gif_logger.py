@@ -179,7 +179,6 @@ def _log_images_as_video_to_wandb(channel_files, iteration_num, config):
 
         # Add iteration info
         if log_dict:
-            log_dict["gif_iteration"] = iteration_num
             wandb.log(log_dict)
             print(f"Logged {len(log_dict)-1} video channels to Wandb for iteration {iteration_num}")
 
