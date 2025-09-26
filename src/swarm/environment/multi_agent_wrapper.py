@@ -96,7 +96,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         self.agent_channel_map = {}
 
         # Gate agents: special assignment for ends, pairs for middle
-        for i, agent_id in enumerate(self.gate_agent_ids):
+        for agent_id in self.gate_agent_ids:
+            i = int(agent_id.split("_")[1])
             if i == 0:
                 # First gate agent: first channel twice
                 self.agent_channel_map[agent_id] = [0, 0]
@@ -110,7 +111,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
                 self.agent_channel_map[agent_id] = [i - 1, i]
 
         # Barrier agents: each gets 1 channel for the dots they separate
-        for i, agent_id in enumerate(self.barrier_agent_ids):
+        for agent_id in self.barrier_agent_ids:
+            i = int(agent_id.split("_")[1])
             self.agent_channel_map[agent_id] = [i]  # Barrier i separates dots i and i+1
 
     def _create_agent_spaces(self, base_obs, base_action):
@@ -298,8 +300,9 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         barrier_actions = np.zeros(self.num_barriers, dtype=np.float32)
 
         # Collect gate actions
-        for i, agent_id in enumerate(self.gate_agent_ids):
+        for agent_id in self.gate_agent_ids:
             if agent_id in agent_actions:
+                i = int(agent_id.split("_")[1])
                 action_value = agent_actions[agent_id]
                 # Handle both scalar and array inputs
                 if hasattr(action_value, "__len__"):
@@ -308,8 +311,9 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
                     gate_actions[i] = float(action_value)
 
         # Collect barrier actions
-        for i, agent_id in enumerate(self.barrier_agent_ids):
+        for agent_id in self.barrier_agent_ids:
             if agent_id in agent_actions:
+                i = int(agent_id.split("_")[1])
                 action_value = agent_actions[agent_id]
                 # Handle both scalar and array inputs
                 if hasattr(action_value, "__len__"):
@@ -337,7 +341,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         # Distribute gate rewards
         if "gates" in global_rewards:
             gate_rewards = global_rewards["gates"]
-            for i, agent_id in enumerate(self.gate_agent_ids):
+            for agent_id in self.gate_agent_ids:
+                i = int(agent_id.split("_")[1])
                 agent_rewards[agent_id] = float(gate_rewards[i])
         else:
             raise ValueError("Missing gate rewards in global_rewards")
@@ -345,7 +350,8 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         # Distribute barrier rewards
         if "barriers" in global_rewards:
             barrier_rewards = global_rewards["barriers"]
-            for i, agent_id in enumerate(self.barrier_agent_ids):
+            for agent_id in self.barrier_agent_ids:
+                i = int(agent_id.split("_")[1])
                 agent_rewards[agent_id] = float(barrier_rewards[i])
         else:
             raise ValueError("Missing barrier rewards in global_rewards")
@@ -444,19 +450,20 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             agent_infos,
         )
 
-    def _get_obs_images(self, obs: Dict[str, Union[np.ndarray, torch.tensor]]):
-        barrier_keys = [k for k in obs.keys() if k.lower().startswith('barrier')]
-        assert len(barrier_keys) == len(self.barrier_agent_ids), "Mismatch between barrier agents and provided observation"
-        channels = []
-        for agent_id in self.barrier_agent_ids:
-            agent_obs = obs[agent_id]
-            if isinstance(agent_obs, torch.Tensor):
-                agent_obs = agent_obs.numpy()
-            channels.append(agent_obs)
+    # def _get_obs_images(self, obs: Dict[str, Union[np.ndarray, torch.tensor]]):
+    #     barrier_keys = [k for k in obs.keys() if k.lower().startswith('barrier')]
+    #     assert len(barrier_keys) == len(self.barrier_agent_ids), "Mismatch between barrier agents and provided observation"
+    #     channels = []
+    #     for agent_id in self.barrier_agent_ids:
+    #         agent_obs = obs[agent_id]
+    #         if isinstance(agent_obs, torch.Tensor):
+    #             agent_obs = agent_obs.numpy()
+    #         channels.append(agent_obs)
 
-        channels = np.stack(channels, axis=-1)
-        channels = np.squeeze(channels)
-        return channels
+    #     channels = np.stack(channels, axis=-1)
+    #     channels = np.squeeze(channels)
+    #     return channels
+
 
     def _init_gif_capture(self):
         """Initialize GIF capture system if this worker is selected."""
@@ -636,7 +643,6 @@ if __name__ == "__main__":
             print(f"    Keys: {list(agent_obs.keys())}")
             print(f"    Image shape: {agent_obs['image'].shape}")
             print(f"    Voltage shape: {agent_obs['voltage'].shape}")
-            print(f"    Is plunger: {agent_obs['is_plunger']}")
 
         # Test step with random actions
         actions = {}
