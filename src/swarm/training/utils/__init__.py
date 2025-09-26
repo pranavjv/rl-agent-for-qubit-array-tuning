@@ -13,7 +13,7 @@ from .metrics_logger import (
 )
 from .policy_mapping import policy_mapping_fn
 from .gif_logger import (
-    cleanup_gif_lock_file,
+    cleanup_gif_files,
     process_and_log_gifs,
     process_episode_gif,
 )
@@ -24,7 +24,7 @@ __all__ = [
     "setup_wandb_metrics",
     "upload_checkpoint_artifact",
     "policy_mapping_fn",
-    "cleanup_gif_lock_file",
+    "cleanup_gif_files",
     "process_and_log_gifs",
     "process_episode_gif",
 ]

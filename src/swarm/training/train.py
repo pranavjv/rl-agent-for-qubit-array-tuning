@@ -45,7 +45,7 @@ from swarm.training.utils import (  # noqa: E402
     setup_wandb_metrics,
     upload_checkpoint_artifact,
     policy_mapping_fn,
-    cleanup_gif_lock_file,
+    cleanup_gif_files,
     process_and_log_gifs,
 )
 
@@ -555,7 +555,7 @@ def main():
         print(f"Training config saved to: {config_save_path}\n")
 
         # Clean up any previous GIF capture lock files
-        cleanup_gif_lock_file()
+        cleanup_gif_files(gif_config['save_dir'])
 
 
         training_start_time = time.time()

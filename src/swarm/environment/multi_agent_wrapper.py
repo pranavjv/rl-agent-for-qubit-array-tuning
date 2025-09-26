@@ -549,6 +549,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         from pathlib import Path
         import numpy as np
         from PIL import Image
+        import matplotlib as mpl
 
         # Create step directory
         save_dir = Path(self.gif_config["save_dir"])
@@ -559,22 +560,32 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             # Plunger agent: 2 channels
             for channel in range(2):
                 channel_data = agent_image[:, :, channel]
-                # Normalize to 0-255 for PNG
-                channel_data_uint8 = ((channel_data - channel_data.min()) /
-                                     (channel_data.max() - channel_data.min() + 1e-8) * 255).astype(np.uint8)
+                # Normalize to 0-1 for colormap
+                channel_data_norm = ((channel_data - channel_data.min()) /
+                                    (channel_data.max() - channel_data.min() + 1e-8))
 
-                img = Image.fromarray(channel_data_uint8, mode='L')
+                # Apply plasma colormap and convert to RGB
+                plasma_cmap = mpl.colormaps['plasma']
+                plasma_cm = plasma_cmap(channel_data_norm)
+                plasma_rgb = (plasma_cm[:, :, :3] * 255).astype(np.uint8)
+
+                img = Image.fromarray(plasma_rgb, mode='RGB')
                 filename = save_dir / f"step_{self.gif_step_count:06d}_channel_{channel}.png"
                 img.save(filename)
 
         else:
             # Barrier agent: 1 channel
             channel_data = agent_image[:, :, 0]
-            # Normalize to 0-255 for PNG
-            channel_data_uint8 = ((channel_data - channel_data.min()) /
-                                 (channel_data.max() - channel_data.min() + 1e-8) * 255).astype(np.uint8)
+            # Normalize to 0-1 for colormap
+            channel_data_norm = ((channel_data - channel_data.min()) /
+                                (channel_data.max() - channel_data.min() + 1e-8))
 
-            img = Image.fromarray(channel_data_uint8, mode='L')
+            # Apply plasma colormap and convert to RGB
+            plasma_cmap = mpl.colormaps['plasma']
+            plasma_cm = plasma_cmap(channel_data_norm)
+            plasma_rgb = (plasma_cm[:, :, :3] * 255).astype(np.uint8)
+
+            img = Image.fromarray(plasma_rgb, mode='RGB')
             filename = save_dir / f"step_{self.gif_step_count:06d}_channel_0.png"
             img.save(filename)
 

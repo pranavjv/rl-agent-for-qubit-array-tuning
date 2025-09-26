@@ -554,8 +554,6 @@ class QuantumDeviceEnv(gym.Env):
             low=-1.0 - 0.5 * (plunger_range-2),
             high=-1.0 + 0.5 * (plunger_range-2), 
         )
-        plunger_center = 0
-
 
         self.plunger_max = plunger_center + 0.5 * plunger_range
         self.plunger_min = plunger_center - 0.5 * plunger_range
@@ -570,7 +568,6 @@ class QuantumDeviceEnv(gym.Env):
                 low=barrier_ground_truths - 0.5 * (barrier_range-1),
                 high=barrier_ground_truths + 0.5 * (barrier_range-1),
             )
-        barrier_center = 0
 
         self.barrier_max = barrier_center + 0.5 * barrier_range
         self.barrier_min = barrier_center - 0.5 * barrier_range

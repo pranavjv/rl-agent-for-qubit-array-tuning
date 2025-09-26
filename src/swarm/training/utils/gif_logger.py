@@ -55,7 +55,7 @@ def process_episode_gif(result, iteration):
         # Don't raise to avoid disrupting training
 
 
-def cleanup_gif_lock_file(gif_save_dir=None):
+def cleanup_gif_files(gif_save_dir=None):
     """Remove gif capture lock file and images from previous training runs."""
     import os
 
@@ -157,10 +157,10 @@ def _log_images_as_video_to_wandb(channel_files, iteration_num, config):
             # Add black frames at start for easy loop detection
             if images:
                 # Create black frames with same shape as first image
-                black_frame = np.zeros_like(images[0])
+                white_frame = np.ones_like(images[0])*255
 
                 # Add 3 black frames at start and 2 at end
-                images = [black_frame] * 3 + images + [black_frame] * 2
+                images = [white_frame] * 3 + images + [white_frame] * 2
 
             # Convert to numpy array with shape (frames, height, width, channels)
             video_array = np.stack(images, axis=0)
