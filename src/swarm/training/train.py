@@ -318,6 +318,7 @@ def main():
         # Note: We'll update wandb config with merged config later after env creation
         setup_wandb_metrics(config['wandb']['ema_period'])
 
+    
     # Initialize Ray with runtime environment from config
     ray_config = {
         "include_dashboard": config['ray']['include_dashboard'],

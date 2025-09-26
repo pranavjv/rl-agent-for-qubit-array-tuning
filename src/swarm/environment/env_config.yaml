@@ -4,42 +4,34 @@
 simulator:
   # Max steps in a single training rollout
   max_steps: 50
-  # Tolerance from ground truth when we are done
-  tolerance: 0.5
 
   num_dots: 4
 
   use_barriers: false
 
   use_deltas: false # Whether the plunger agents' output is a ΔV or V
-
-  breadcrumb_reward_factor: 1. # Factor between 'terminal' and 'approach' rewards
-  # log distance to termination separately
   
-  measurement:
-    # Voltage sweep ranges for charge stability diagram
-    gate_voltage_sweep_range: {"min": -1.0, "max": 1.0}
-    # Total gate voltage range
-    # gate_voltage_range: {"min": -10, "max": 10}
-    # Admissible action range for delta voltages
-    gate_delta_range: {"min": -2.0, "max": 2.0}
-    # Total barrier voltage range
-    barrier_voltage_range: {"min": -2.0, "max": 2.0} # TODO
-    # resolution for simulator images
-    resolution: 100
+  delta_max: 2.0 #only used if use_deltas is true
+  
+  full_plunger_range_width: {"min": 15, "max": 20} #range in V of plungers
 
-    reward_window_size: 20 # window size normalisation for plunger reward calculation
-    gate_reward_exp: 1.0 # exponent for plunger reward
+  window_delta_range: {"min": 1.0, "max": 2.0} #range in V for a single scan/sweep
 
-    # domain randomisation parameters (only for gate voltages)
-    gate_voltage_range_min: {"min": -20, "max": -5}
-    gate_voltage_range_max: {"min": 5, "max": 15}
+  full_barrier_range_width: {"min": 6, "max": 10} #range in V of barriers
 
-    random_window_size: {"min": 0.9, "max": 1.5} # scale factor that multiplies gate_voltage_sweep_range
-    random_action_scaling: {"min": 0.0, "max": 0.0}
-    random_action_offset: {"min": 0.0, "max": 0.0}
-    random_center_offset: {"min": 0.0, "max": 0.0}
-    
+  resolution: 100
+
+
+reward:
+  reward_window_size: 20 # window size normalisation for plunger reward calculation
+  
+  gate_reward_exp: 1.0 # exponent for plunger reward
+  
+  breadcrumb_reward_factor: 1. # Factor between 'terminal' and 'approach' rewards
+
+  tolerance: 0.5 #distance from ground truth to cap at max reward
+
+
 capacitance_model:
   update_method: "fake"  # Options: null (does not update vgm), "fake" (for testing/debugging), "bayesian" (simple prior), "kriging" (history based spatial prior)
 

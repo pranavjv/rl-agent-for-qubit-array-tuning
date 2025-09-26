@@ -42,54 +42,31 @@ class QuantumDeviceEnv(gym.Env):
         """
         super().__init__()
 
+        # environment parameters
         self.config = self._load_config(config_path)
         self.training = training  # if we are training or not
         self.num_dots = self.config['simulator']['num_dots']
         self.use_barriers = self.config['simulator']['use_barriers']
         self.use_deltas = self.config['simulator']['use_deltas']
-
-        # obs voltage min/max define the range over which we sweep the 2d csd pairs
-        self.obs_voltage_min = self.config["simulator"]["measurement"]["gate_voltage_sweep_range"][
-            "min"
-        ]
-        self.obs_voltage_max = self.config["simulator"]["measurement"]["gate_voltage_sweep_range"][
-            "max"
-        ]
-        self.debug = self.config["init"]["debug"]
-        self.obs_image_size = self.config["simulator"]["measurement"]["resolution"]
-        
-        if self.debug:
-            self._init_debug_logs()
-
-        # --- environment parameters ---
         self.max_steps = self.config["simulator"]["max_steps"]
-        self.tolerance = self.config["simulator"]["tolerance"]
-        self.reward_factor = self.config['simulator']['breadcrumb_reward_factor']
-
         self.num_plunger_voltages = self.num_dots
         self.num_barrier_voltages = self.num_dots - 1
-        # self.gate_voltage_min = self.config["simulator"]["measurement"]["gate_voltage_range"]["min"]
-        # self.gate_voltage_max = self.config["simulator"]["measurement"]["gate_voltage_range"]["max"]
-        gate_voltage_range_min = self.config["simulator"]["measurement"]["gate_voltage_range_min"]
-        gate_voltage_range_max = self.config["simulator"]["measurement"]["gate_voltage_range_max"]
-        self.gate_voltage_min = np.random.uniform(gate_voltage_range_min["min"], gate_voltage_range_min["max"], self.num_plunger_voltages)
-        self.gate_voltage_max = np.random.uniform(gate_voltage_range_max["min"], gate_voltage_range_max["max"], self.num_plunger_voltages)
-        self.reward_window_size = self.config["simulator"]["measurement"]["reward_window_size"]
-        self.gate_reward_exp = self.config["simulator"]["measurement"]["gate_reward_exp"]
 
-        self.barrier_voltage_min = self.config["simulator"]["measurement"]["barrier_voltage_range"][
-            "min"
-        ]
-        self.barrier_voltage_max = self.config["simulator"]["measurement"]["barrier_voltage_range"][
-            "max"
-        ]
+        #voltage range params
+        self.full_plunger_range_width = self.config['simulator']['full_plunger_range_width']
+        self.window_delta_range = self.config['simulator']['window_delta_range']
+        self.full_barrier_range_width = self.config['simulator']['full_barrier_range_width']
 
-        self.gate_delta_min = self.config["simulator"]["measurement"]["gate_delta_range"]["min"]
-        self.gate_delta_max = self.config["simulator"]["measurement"]["gate_delta_range"]["max"]
+        # capacitance model parameters
+        self.update_method = self.config['capacitance_model']['update_method']
 
-        # self.random_center_offset_min = self.config["simulator"]["measurement"]["random_center_offset"]["min"]
-        # self.random_center_offset_max = self.config["simulator"]["measurement"]["random_center_offset"]["max"]
-        
+
+        #reward parameters
+        self.reward_window_size = self.config["reward"]["reward_window_size"]
+        self.gate_reward_exp = self.config["reward"]["gate_reward_exp"]
+        self.tolerance = self.config["reward"]["tolerance"]
+        self.reward_factor = self.config['reward']['breadcrumb_reward_factor']
+
         self.action_space = spaces.Dict(
             {
                 "action_gate_voltages": spaces.Box(
@@ -118,8 +95,6 @@ class QuantumDeviceEnv(gym.Env):
                     dtype=np.float32,
                 ),
                 "obs_gate_voltages": spaces.Box(
-                    # low=self.gate_voltage_min + self.random_center_offset_min,
-                    # high=self.gate_voltage_max + self.random_center_offset_max,
                     low=-1.0,
                     high=1.0,
                     shape=(self.num_plunger_voltages,),
@@ -139,51 +114,6 @@ class QuantumDeviceEnv(gym.Env):
 
         self.reset()
 
-    
-    def _init_debug_logs(self):
-        import uuid
-        self.env_id = str(uuid.uuid4())[:8]
-        
-        # Use absolute path to ensure logs go to the correct location even in Ray workers
-        if "SWARM_PROJECT_ROOT" in os.environ:
-            # Ray mode: SWARM_PROJECT_ROOT is the project root, need to append src/swarm
-            swarm_dir = Path(os.environ["SWARM_PROJECT_ROOT"]) / "src" / "swarm"
-        else:
-            # Local mode: resolve from current file location
-            swarm_dir = Path(__file__).parent.parent.resolve()
-        
-        log_dir = swarm_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = str(log_dir / "env.log")
-        id_file = str(log_dir / "env_id.txt")
-        
-        # Check if file exists and read its content
-        if os.path.exists(id_file):
-            with open(id_file, 'r') as f:
-                primary_env_id = f.read().strip()
-        else:
-            primary_env_id = ""
-        
-        # If file is empty or doesn't exist, this env becomes primary
-        if not primary_env_id:
-            with open(id_file, 'w') as f:
-                f.write(self.env_id)
-            primary_env_id = self.env_id
-        
-        self.should_log = (self.env_id == primary_env_id)
-
-        # self.should_log = True # override for debugging
-        
-        if self.should_log:
-            self.logger = logging.getLogger(f"{__name__}.{self.env_id}")
-            if not self.logger.handlers:
-                handler = logging.FileHandler(log_file, mode='a')
-                handler.setLevel(logging.DEBUG)
-                formatter = logging.Formatter(f'%(asctime)s - ENV[{self.env_id}] - %(levelname)s - %(message)s')
-                handler.setFormatter(formatter)
-                self.logger.addHandler(handler)
-                self.logger.setLevel(logging.DEBUG)
-            self.logger.info(f"Debug logging initialized for env {self.env_id}")
 
 
     def reset(self, seed=None, options=None):
@@ -211,6 +141,8 @@ class QuantumDeviceEnv(gym.Env):
         # --- Reset the environment's state ---
         self.current_step = 0
 
+        plunger_range, window_delta, barrier_range = self._init_voltages()
+
         self.array = QarrayBaseClass(
             num_dots=self.num_dots,
             use_barriers=self.use_barriers,
@@ -221,14 +153,15 @@ class QuantumDeviceEnv(gym.Env):
         )
 
 
-        # --- Get random initial scaling and position ---
-        self._init_random_action_scaling()
-        center = self._random_center()
-
-        # need to recompute the ground truths if we re-randomise qarray params
-        # plunger_ground_truth = self.array.calculate_ground_truth()
-        # barrier_ground_truth = self._compute_barrier_ground_truth()
+        #need to recompute the ground truths if we re-randomise qarray params
         plunger_ground_truth, barrier_ground_truth, _ = self.array.calculate_ground_truth()
+
+        plunger_center = np.random.uniform(
+            low=-1.0 - 0.5 * plunger_range,
+            high=-1.0 + 0.5 * plunger_range,
+        )
+        self.plunger_max = plunger_center + 0.5 * plunger_range
+        self.plunger_min = plunger_center - 0.5 * plunger_range
 
         if barrier_ground_truth is None:
             assert not self.use_barriers, "Expected array for barrier_ground_truth, got None"
@@ -237,14 +170,10 @@ class QuantumDeviceEnv(gym.Env):
         self.device_state = {
             "gate_ground_truth": plunger_ground_truth,
             "barrier_ground_truth": barrier_ground_truth,
-            "current_gate_voltages": center["gates"],
-            "current_barrier_voltages": center["barriers"],
+            "current_gate_voltages": np.zeros(self.num_plunger_voltages, dtype=np.float32),
+            "current_barrier_voltages": np.zeros(self.num_barrier_voltages, dtype=np.float32),
             "virtual_gate_matrix": self.array.model.gate_voltage_composer.virtual_gate_matrix,
         }
-        if self.debug and self.should_log:
-            self.logger.debug("RESET - plunger_ground_truth: %s", plunger_ground_truth)
-            self.logger.debug("RESET - barrier_ground_truth: %s", barrier_ground_truth)
-            self.logger.debug("RESET - center: %s", center)
 
         # --- Return the initial observation ---
         raw_observation = self.array._get_obs(
@@ -255,38 +184,12 @@ class QuantumDeviceEnv(gym.Env):
 
         self._update_virtual_gate_matrix(observation)
 
-        observation["obs_gate_voltages"]# += self.random_center_offset
+        observation["obs_gate_voltages"]
 
         info = self._get_info()
 
         return observation, info
 
-    def _rescale_gate_voltages(self, obs):
-        assert isinstance(obs, (np.ndarray, list)), f"Cannot rescale observation of type {type(obs)}"
-        obs = obs.astype(np.float32)
-
-        # apply random transformation (if we are training)
-        if self.training:
-            obs = self.action_scale_factor * obs + self.action_offset
-
-        obs = (obs + 1) / 2 # [0, 1]
-
-        if self.use_deltas:
-            obs = obs * (self.gate_delta_max - self.gate_delta_min) + self.gate_delta_min
-            obs += self.device_state["current_gate_voltages"]
-        else:
-            obs = obs * (self.gate_voltage_max - self.gate_voltage_min) + self.gate_voltage_min
-
-        obs = np.clip(obs, self.gate_voltage_min, self.gate_voltage_max)
-        return obs
-
-    def _rescale_barrier_voltages(self, obs):
-        assert isinstance(obs, (np.ndarray, list)), f"Cannot rescale observation of type {type(obs)}"
-        obs = obs.astype(np.float32)
-
-        obs = (obs + 1) / 2 # [0, 1]
-        obs = obs * (self.barrier_voltage_max - self.barrier_voltage_min) + self.barrier_voltage_min
-        return obs
 
 
     def step(self, action):
@@ -388,9 +291,6 @@ class QuantumDeviceEnv(gym.Env):
             barrier_ground_truth - current_barrier_voltages
         )  # Element-wise distances
 
-        # max_gate_distance = (
-        #     self.gate_voltage_max - self.gate_voltage_min
-        # )  # only gives reward when gt is visible
         max_barrier_distance = (
             self.barrier_voltage_max - self.barrier_voltage_min
         )  # always gives reward
@@ -557,39 +457,6 @@ class QuantumDeviceEnv(gym.Env):
         self.array._update_virtual_gate_matrix(cgd_estimate)
 
 
-    def _init_random_action_scaling(self):
-        """
-        Initialize random scaling and offset for gate voltages.
-        Each gate voltage dimension gets:
-        - A random scale factor near 1.0 (e.g., 0.8 to 1.2)
-        - A random offset near 0.0 (e.g., -0.1 to 0.1)
-        """
-        if self.training:
-            # Apply random action linear transformation (diagonal)
-            action_scalings = self.config['simulator']['measurement']['random_action_scaling']
-            self.action_scale_factor = np.random.uniform(
-                action_scalings['min'], action_scalings['max'], self.num_plunger_voltages
-            ).astype(np.float32)
-
-            action_offsets = self.config['simulator']['measurement']['random_action_offset']
-            self.action_offset = np.random.uniform(
-                action_offsets['min'], action_offsets['max'], self.num_plunger_voltages
-            ).astype(np.float32)
-
-            random_window_size = self.config['simulator']['measurement']['random_window_size']
-            self.window_size = np.random.uniform(random_window_size['min'], random_window_size['max']) # single consistent window size
-
-            self.obs_voltage_min = self.obs_voltage_min*self.window_size
-       
-            self.obs_voltage_max = self.obs_voltage_max*self.window_size
-
-            # self.random_center_offset = np.random.uniform(self.random_center_offset_min, self.random_center_offset_max, self.num_plunger_voltages)
-            
-        else:
-            # No scaling during inference
-            self.action_scale_factor = np.ones(self.num_plunger_voltages, dtype=np.float32)
-            self.action_offset = np.zeros(self.num_plunger_voltages, dtype=np.float32)
-            # self.random_center_offset = np.zeros(self.num_plunger_voltages)
 
     def _init_capacitance_model(self):
         """
@@ -697,21 +564,28 @@ class QuantumDeviceEnv(gym.Env):
             print("The environment will continue without capacitance prediction capabilities.")
             self.capacitance_model = None
 
-    def _random_center(self):
-        """
-        Randomly generate a center voltage for the voltage sweep.
-        """
-        gate_centers = np.random.uniform(
-            self.gate_voltage_min - self.obs_voltage_min,
-            self.gate_voltage_max - self.obs_voltage_max,
-            self.num_plunger_voltages,
+    def _init_voltages(self):
+        full_plunger_range_width = self.config['simulator']['full_plunger_range_width']
+        window_delta_range = self.config['simulator']['window_delta_range']
+        full_barrier_range_width = self.config['simulator']['full_barrier_range_width']
+
+        plunger_range = np.random.uniform(
+            low=full_plunger_range_width['min'],
+            high=full_plunger_range_width['max']
         )
-        barrier_centers = np.random.uniform(
-            self.barrier_voltage_min,
-            self.barrier_voltage_max,
-            self.num_barrier_voltages,
+
+        window_delta = np.random.uniform(
+            low=window_delta_range['min'],
+            high=window_delta_range['max']
         )
-        return {"gates": gate_centers, "barriers": barrier_centers}
+
+        barrier_range = np.random.uniform(
+            low=full_barrier_range_width['min'],
+            high=full_barrier_range_width['max']
+        )
+
+        return plunger_range, window_delta, barrier_range
+
 
     def _load_config(self, config_path):
         # Make config path relative to the env.py file directory
