@@ -590,7 +590,7 @@ class QuantumDeviceEnv(gym.Env):
 
         return plunger_centers, barrier_centers  
 
-    def _rescale_voltages(voltages, target_min, target_max, source_min=-1, source_max=1):
+    def _rescale_voltages(self, voltages, target_min, target_max, source_min=-1, source_max=1):
         voltages = (voltages - source_min) / (source_max - source_min)
         voltages = voltages * (target_max - target_min) + target_min
         return voltages
