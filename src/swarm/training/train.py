@@ -250,7 +250,7 @@ def create_env(config=None, gif_config=None):
     os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.1")
     os.environ.setdefault("JAX_ENABLE_X64", "true")
 
-    assert gif_config is not None
+    assert gif_config is not None, "Gif config dict required to set up rollout visualisation"
     
     # Try to clear any existing JAX state
     try:

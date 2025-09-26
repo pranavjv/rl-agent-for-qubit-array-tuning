@@ -55,9 +55,10 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
 
 
         self.return_voltage = return_voltage
-        
+
         self.gif_config = gif_config
-        self._init_gif_capture()
+        if self.gif_config is not None:
+            self._init_gif_capture()
 
         self.base_env = QuantumDeviceEnv(training=training)
 
@@ -75,13 +76,11 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         self._setup_channel_assignments()
 
         # Preserve original spaces for policy mapping
-        base_obs = self.base_env.observation_space
-        base_action = self.base_env.action_space
-        self.base_observation_space = base_obs
-        self.base_action_space = base_action
+        self.base_observation_space = self.base_env.observation_space
+        self.base_action_space = self.base_env.action_space
 
         # Create individual agent spaces
-        self._create_agent_spaces(base_obs, base_action)
+        self._create_agent_spaces(self.base_observation_space, self.base_action_space)
 
     def _setup_channel_assignments(self):
         """
@@ -118,7 +117,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         """Create observation and action spaces for individual agents."""
         image_shape = base_obs["image"].shape  # (H, W, N-1)
 
-        # Voltage ranges
+        # Voltage ranges (should all be -1 to 1)
         gate_low = base_action["action_gate_voltages"].low[0]
         gate_high = base_action["action_gate_voltages"].high[0]
         barrier_low = base_action["action_barrier_voltages"].low[0]
@@ -249,16 +248,19 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
                 agent_image = np.stack([img1, img2], axis=2)
             elif agent_idx == self.num_gates - 1:
                 # Final agent: flip both images
-                agent_image = np.stack([np.flipud(img1), np.flipud(img2)], axis=2)
+                img1 = np.transpose(img1, (1, 0, 2))
+                img2 = np.transpose(img2, (1, 0, 2))
+                agent_image = np.stack([img1, img2], axis=2)
             else:
                 # Middle agents: flip only second image
-                agent_image = np.stack([img1, np.flipud(img2)], axis=2)
+                img2 = np.transpose(img2, (1, 0, 2))
+                agent_image = np.stack([img1, img2], axis=2)
         else:
             # Barrier agent: 1 channel
             agent_image = global_image[:, :, channels[0] : channels[0] + 1]
 
             
-        if (hasattr(self, 'should_capture_gifs') and self.should_capture_gifs and agent_id == self._get_target_agent_id()):
+        if (self.gif_config is not None and hasattr(self, 'should_capture_gifs') and self.should_capture_gifs and agent_id == self._get_target_agent_id()):
             self._save_agent_image(agent_image, agent_id)
             
         if self.return_voltage:
