@@ -23,7 +23,9 @@ simulator:
 
 
 reward:
-  reward_window_size: 20 # window size normalisation for plunger reward calculation
+  plunger_reward_window_size: 20 # window size normalisation for plunger reward calculation
+
+  barrier_reward_window_size: 10 #same for barrier
   
   gate_reward_exp: 1.0 # exponent for plunger reward
   
