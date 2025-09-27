@@ -136,24 +136,24 @@ neural_networks:
       type: "IMPALA"
       # note custom backbone layers will only be applied for SimplCNN and IMPALA
       conv_layers:
-        - {channels: 16, kernel: 4, stride: 2}
-        - {channels: 32, kernel: 3, stride: 2}
-        - {channels: 64, kernel: 3, stride: 1}
-      feature_size: 512
+        - {channels: 16, kernel: 3, stride: 1}
+        - {channels: 32, kernel: 3, stride: 1}
+        - {channels: 32, kernel: 3, stride: 1}
+      feature_size: 256
       adaptive_pooling: true
       lstm:
         enabled: true
-        cell_size: 512
-        num_layers: 2
+        cell_size: 256
+        num_layers: 1
         max_seq_len: 50
         use_prev_action: true
         use_prev_reward: false
     policy_head:
-      hidden_layers: [64, 64]  
+      hidden_layers: [32]
       activation: "relu"
       use_attention: true
     value_head:
-      hidden_layers: [512, 64]
+      hidden_layers: [32]
       activation: "relu"
       use_attention: true
 
@@ -166,10 +166,10 @@ neural_networks:
       adaptive_pooling: true
       # No lstm section = no LSTM for barriers
     policy_head:
-      hidden_layers: [32, 32]  
+      hidden_layers: [32]  
       activation: "relu"
       use_attention: false
     value_head:
-      hidden_layers: [32, 32]
+      hidden_layers: [32]
       activation: "relu"
       use_attention: false
