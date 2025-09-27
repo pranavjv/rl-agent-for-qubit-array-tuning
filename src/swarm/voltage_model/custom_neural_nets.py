@@ -223,8 +223,7 @@ class ResNetBlock(nn.Module):
         residual = x
         x = self.activation(self.conv1(x))
         x = self.conv2(x)
-        x = x + residual
-        return self.activation(x)
+        return x + residual
 
 
 class IMPALA(TorchModel, Encoder):
@@ -242,14 +241,14 @@ class IMPALA(TorchModel, Encoder):
         
         for i, (out_channels, kernel_size, stride) in enumerate(config.cnn_filter_specifiers):
             cnn_layers.extend([
-                nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=1),
-                nn.ReLU() if config.cnn_activation == "relu" else nn.Tanh(),
+                nn.Conv2d(in_channels, out_channels, kernel_size, padding=1),
+                nn.MaxPool2d(stride, stride) if stride > 1 else nn.Identity(),
+                nn.ReLU()
             ])
             
-            # Add ResNet blocks after each conv layer (except the first)
-            if i > 0:
-                for _ in range(config.num_res_blocks):
-                    cnn_layers.append(ResNetBlock(out_channels, config.cnn_activation))
+
+            for _ in range(config.num_res_blocks):
+                cnn_layers.append(ResNetBlock(out_channels, config.cnn_activation))
             
             in_channels = out_channels
         

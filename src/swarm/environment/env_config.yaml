@@ -27,11 +27,11 @@ reward:
 
   barrier_reward_window_size: 10 #same for barrier
   
-  gate_reward_exp: 1.0 # exponent for plunger reward
+  gate_reward_exp: 2.0 # exponent for plunger reward
   
   breadcrumb_reward_factor: 1. # Factor between 'terminal' and 'approach' rewards
 
-  tolerance: 0.5 #distance from ground truth to cap at max reward
+  tolerance: 0.1 #distance from ground truth to cap at max reward
 
 
 capacitance_model:
