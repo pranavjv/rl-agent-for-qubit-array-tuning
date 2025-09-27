@@ -3,7 +3,7 @@
 
 # Default training parameters
 defaults:
-  num_iterations: 400        # Total training iterations
+  num_iterations: 1000        # Total training iterations
   num_gpus: 8                # Default number of GPUs to use
 
 # Weights & Biases configuration

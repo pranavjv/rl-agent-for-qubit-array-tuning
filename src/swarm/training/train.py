@@ -339,6 +339,8 @@ def main():
 
     try:
         gif_config = config["gif_config"]
+        # Clean up any previous GIF capture lock files
+        cleanup_gif_files(gif_config['save_dir'])
 
         create_env_fn = partial(create_env, gif_config=gif_config)
         register_env("qarray_multiagent_env", create_env_fn)
@@ -553,9 +555,6 @@ def main():
         remaining_iterations = config['defaults']['num_iterations'] - start_iteration
         print(f"\nStarting training for {remaining_iterations} iterations (from iteration {start_iteration + 1} to {config['defaults']['num_iterations']})...\n")
         print(f"Training config saved to: {config_save_path}\n")
-
-        # Clean up any previous GIF capture lock files
-        cleanup_gif_files(gif_config['save_dir'])
 
 
         training_start_time = time.time()
