@@ -24,12 +24,18 @@ echo "2️⃣  Checking CUDA Modules"
 echo "-----------------------------"
 module spider CUDA
 
-CUDA_VERSION=$(module avail CUDA 2>&1 | grep -oP 'CUDA/\\S+' | sort -V | tail -n 1)
+CUDA_VERSION=$(module spider CUDA 2>&1 | grep -oP 'CUDA/12\.[0-9\.]+' | sort -V | tail -n 1)
+
 if [[ -z "$CUDA_VERSION" ]]; then
-    echo "⚠️ No CUDA modules found."
+    echo "⚠️ No CUDA 12.x modules found. Trying any CUDA version..."
+    CUDA_VERSION=$(module spider CUDA 2>&1 | grep -oP 'CUDA/[0-9\.]+' | sort -V | tail -n 1)
+fi
+
+if [[ -z "$CUDA_VERSION" ]]; then
+    echo "❌ No CUDA modules found at all — continuing without CUDA."
 else
-    echo "Loading CUDA module: $CUDA_VERSION"
-    module load $CUDA_VERSION
+    echo "✅ Loading CUDA module: $CUDA_VERSION"
+    module load "$CUDA_VERSION"
 fi
 
 echo "-----------------------------"
