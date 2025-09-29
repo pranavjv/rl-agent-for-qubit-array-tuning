@@ -86,8 +86,11 @@ conda activate "$ENV_NAME"
 # -----------------------------
 
 # torch, ray[rllib], qarray, wandb, torchvision[models]
+# scikit-learn, qarray-latched, ray[tune]
 PACKAGES=(
-    "torchvision[models]"
+    "scikit-learn"
+    "git+ssh://git@github.com/b-vanstraaten/qarray-latched.git@c076d4cef57a071dd6e52458ad5937589747c18f"
+    
 )
 
 pip install --upgrade pip
