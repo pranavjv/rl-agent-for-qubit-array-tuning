@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Print debug info
 echo "=============================="
 echo "User: $USER"
 echo "Hostname: $(hostname)"
@@ -8,15 +7,14 @@ echo "Working directory: $PWD"
 echo "Date: $(date)"
 echo "=============================="
 
-# Load Anaconda
+# Load Anaconda module
 module purge
 module load Anaconda3
 
-# Show available Conda environments
-echo "Listing Conda environments..."
-conda env list
+# Initialize conda shell functions
+source /apps/system/easybuild/software/Anaconda3/2022.05/etc/profile.d/conda.sh
 
-# Try to activate the environment
+# Activate environment
 ENV_NAME="rl_train_env"
 
 if conda env list | grep -q "$ENV_NAME"; then
@@ -27,7 +25,7 @@ else
     exit 1
 fi
 
-# Print Python version and environment path
+# Test environment
 echo "Python version in environment:"
 python --version
 
