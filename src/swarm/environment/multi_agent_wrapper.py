@@ -5,9 +5,8 @@ This wrapper converts the global observation/action spaces into individual agent
 and handles the conversion between single-agent actions and global environment actions.
 """
 
-import os
 import sys
-from typing import Dict, Union
+from typing import Dict
 
 import numpy as np
 import torch
@@ -553,9 +552,12 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
     def _setup_gif_directories(self):
         """Set up directories for GIF capture."""
         from pathlib import Path
+        import os
 
         base_dir = Path(self.gif_config["save_dir"])
-        base_dir.mkdir(parents=True, exist_ok=True)
+        base_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
+        # Ensure permissions are set correctly even if directory already existed
+        os.chmod(base_dir, 0o777)
         print(f"GIF capture directory ready: {base_dir}")
 
     def _get_target_agent_id(self):
@@ -570,10 +572,16 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         import numpy as np
         from PIL import Image
         import matplotlib as mpl
+        import os
 
         # Create step directory
         save_dir = Path(self.gif_config["save_dir"])
-        save_dir.mkdir(parents=True, exist_ok=True)
+        save_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
+        # Ensure permissions are set correctly even if directory already existed
+        try:
+            os.chmod(save_dir, 0o777)
+        except:
+            pass  # Directory may not exist or permissions may not be settable
 
         # Save each channel as a separate image
         if agent_image.shape[2] == 2:
