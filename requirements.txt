@@ -4,8 +4,9 @@ qarray
 
 # Core ML/RL dependencies
 torch
-torchvision
+torchvision[models]
 ray[rllib]
+# ray[tune]
 wandb
 gymnasium
 
