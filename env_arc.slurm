@@ -85,7 +85,7 @@ conda activate "$ENV_NAME"
 # 2a️⃣ Install specific packages
 # -----------------------------
 PACKAGES=(
-    "torch"
+    "ray[rllib]"
 )
 
 pip install --upgrade pip
