@@ -84,8 +84,10 @@ conda activate "$ENV_NAME"
 # -----------------------------
 # 2a️⃣ Install specific packages
 # -----------------------------
+
+# torch, ray[rllib], qarray
 PACKAGES=(
-    "ray[rllib]"
+    "qarray"
 )
 
 pip install --upgrade pip
