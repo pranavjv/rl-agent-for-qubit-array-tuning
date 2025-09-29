@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:8 --constraint='gpu_mem:32GB'
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=24
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --clusters=htc
 #SBATCH --partition=long
