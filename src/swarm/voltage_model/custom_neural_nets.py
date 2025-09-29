@@ -9,6 +9,7 @@ from ray.rllib.core.models.torch.base import TorchModel
 from ray.rllib.utils.framework import try_import_torch
 
 torch, nn = try_import_torch()
+import torch.nn.functional as F
 
 # Import torchvision models for MobileNet
 try:

@@ -266,18 +266,18 @@ def create_env(config=None, gif_config=None):
     return MultiAgentEnvWrapper(return_voltage=True, gif_config=gif_config)
 
 
-def create_env_to_module_connector(env, spaces, device, use_deltas):
+def create_env_to_module_connector(env, spaces, device, use):
     """
     Creates module connector for action to memory handling.
-    Note: do not modify the signature, ray expects these arguments
+    Note: do not modify the signature, ray expects arguments 0-2
     
     Args:
         env: The (vectorized) gym environment
         spaces: Dict with space info like {'__env__': ([obs_space, act_space]), '__env_single__': ([obs_space, act_space])}
         device: Torch device (can be None)
-        use_deltas: Whether to use delta actions (from partial)
+        use: Whether to use the custom connector or not
     """
-    if use_deltas:
+    if use:
         from swarm.voltage_model.prev_action_handling import CustomPrevActionHandling
         return [CustomPrevActionHandling()]
     else:
@@ -429,7 +429,8 @@ def main():
 
         # Handle voltage parsing to memory manually
         use_deltas = env_instance.base_env.use_deltas
-        env_to_module_connector = partial(create_env_to_module_connector, use_deltas=use_deltas)
+        has_lstm = config['neural_networks']['plunger_policy']['backbone']['lstm']['enabled']
+        env_to_module_connector = partial(create_env_to_module_connector, use=use_deltas and has_lstm)
 
         algo_config = (
             algo_config_builder()

@@ -52,4 +52,4 @@ fi
 # 3. Run your training script
 # -----------------------------
 echo "Running training script..."
-srun python src/swarm/train.py
+srun python src/swarm/training/train.py
