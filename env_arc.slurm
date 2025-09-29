@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --clusters=htc
-#SBATCH --partition=long
+#SBATCH --partition=short
 
 # --- Force write job status on exit ---
 function finish {
@@ -30,7 +30,6 @@ module spider CUDA
 
 # Automatically load latest CUDA version if available
 CUDA_VERSION=$(module avail CUDA 2>&1 | grep -oP 'CUDA/\S+' | sort -V | tail -n 1)
-
 if [[ -z "$CUDA_VERSION" ]]; then
   echo "⚠️ No CUDA modules found. Proceeding without CUDA."
 else
@@ -55,7 +54,13 @@ source activate rl_train_env
 pip install --upgrade pip
 pip install -r requirements.txt
 
-echo "✅ Environment setup complete."
+# -----------------------------
+# Export environment to YAML
+# -----------------------------
+echo "Exporting Conda environment to rl_train_env.yml for portability..."
+conda env export -n rl_train_env --no-builds > rl_train_env.yml
+
+echo "✅ Environment setup and YAML export complete."
 
 
 # Run with: sbatch env.slurm
