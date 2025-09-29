@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --clusters=htc
-#SBATCH --partition=short
+#SBATCH --partition=long
 #SBATCH --mail-user=edn.work@proton.me
 #SBATCH --mail-type=ALL
 
