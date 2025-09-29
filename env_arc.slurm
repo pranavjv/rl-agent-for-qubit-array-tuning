@@ -31,7 +31,7 @@ log_disk_usage() {
     echo "-------------------------------------"
 }
 
-log_disk_usage
+# log_disk_usage
 
 # -----------------------------
 # 1️⃣ Load Anaconda & CUDA
@@ -52,7 +52,7 @@ else
     module load "$CUDA_VERSION"
 fi
 
-log_disk_usage
+# log_disk_usage
 
 # -----------------------------
 # 2️⃣ Enable Conda & Create/Activate Env
@@ -69,7 +69,7 @@ fi
 conda clean --all -y
 pip cache purge
 
-log_disk_usage
+# log_disk_usage
 
 # Create environment
 ENV_NAME="rl_train_env"
@@ -97,7 +97,7 @@ done
 # Clean caches after installation
 conda clean --all -y
 pip cache purge
-log_disk_usage
+# log_disk_usage
 
 echo "Using Python: $(which python)"
 echo "Python version: $(python --version)"
