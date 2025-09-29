@@ -10,6 +10,17 @@
 #SBATCH --clusters=htc
 #SBATCH --partition=long
 
+# --- Force write job status on exit ---
+function finish {
+    STATUS=$?
+    if [ $STATUS -eq 0 ]; then
+        echo "✅ Job completed successfully."
+    else
+        echo "❌ Job failed with exit code $STATUS."
+    fi
+}
+trap finish EXIT
+
 echo "=== Loading Anaconda ==="
 module purge
 module load Anaconda3
@@ -17,8 +28,7 @@ module load Anaconda3
 echo "=== Checking available CUDA versions ==="
 module spider CUDA
 
-# Try to load latest CUDA version automatically
-# (grabs highest-numbered version from `module avail` output)
+# Automatically load latest CUDA version if available
 CUDA_VERSION=$(module avail CUDA 2>&1 | grep -oP 'CUDA/\S+' | sort -V | tail -n 1)
 
 if [[ -z "$CUDA_VERSION" ]]; then
@@ -28,7 +38,7 @@ else
   module load $CUDA_VERSION
 fi
 
-# Activate conda init
+# Activate conda
 source ~/.bashrc
 
 # Create environment if missing
