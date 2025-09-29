@@ -1,61 +1,84 @@
 #!/bin/bash
 
-echo "=============================="
-echo "🔎 SHELL DIAGNOSTICS"
-echo "=============================="
-echo "Shell: $SHELL"
-echo "Is interactive? [[ \$- == *i* ]] → $([[ $- == *i* ]] && echo yes || echo no)"
-echo "Is login shell? shopt -q login_shell → $(shopt -q login_shell && echo yes || echo no)"
-echo "BASH Version: $BASH_VERSION"
-echo "Current User: $USER"
+echo "====================================="
+echo "🔎 DEBUGGING MODULE & CONDA ACTIVATION"
+echo "====================================="
+
+echo "Current Shell: $SHELL"
+echo "Is Interactive? [[ \$- == *i* ]] → [[ $- == *i* ]]"
 echo "Hostname: $(hostname)"
-echo "Working Directory: $PWD"
+echo "Working Directory: $(pwd)"
 echo "Date: $(date)"
-echo "=============================="
 
-echo "🔎 PATH INFO"
-echo "$PATH"
-echo "------------------------------"
-
-echo "🔎 CHECK 'conda' COMMAND AVAILABILITY"
-type conda 2>/dev/null || echo "'conda' not found in PATH"
-which conda || echo "'which conda' returned nothing"
-echo "------------------------------"
-
-echo "🔎 Sourcing Anaconda3 Module..."
+echo "-----------------------------"
+echo "1️⃣  Loading Anaconda3 module"
+echo "-----------------------------"
 module purge
 module load Anaconda3
 
 echo "PATH after module load:"
 echo "$PATH"
-echo "------------------------------"
 
-echo "🔎 Is 'conda' available now?"
-type conda 2>/dev/null || echo "'conda' still not found after module load"
-which conda || echo "'which conda' still returns nothing"
+echo "-----------------------------"
+echo "2️⃣  Checking CUDA Modules"
+echo "-----------------------------"
+module spider CUDA
 
-echo "------------------------------"
-echo "🔎 Checking for conda.sh at expected path:"
-ls -l /apps/system/easybuild/software/Anaconda3/2022.05/etc/profile.d/conda.sh
+CUDA_VERSION=$(module avail CUDA 2>&1 | grep -oP 'CUDA/\\S+' | sort -V | tail -n 1)
+if [[ -z "$CUDA_VERSION" ]]; then
+    echo "⚠️ No CUDA modules found."
+else
+    echo "Loading CUDA module: $CUDA_VERSION"
+    module load $CUDA_VERSION
+fi
 
-echo "------------------------------"
-echo "🔎 Manually sourcing conda.sh..."
-source /apps/system/easybuild/software/Anaconda3/2022.05/etc/profile.d/conda.sh
+echo "-----------------------------"
+echo "3️⃣  Sourcing conda.sh"
+echo "-----------------------------"
+CONDA_SH="/apps/system/easybuild/software/Anaconda3/2022.05/etc/profile.d/conda.sh"
+if [[ -f "$CONDA_SH" ]]; then
+    echo "Found $CONDA_SH — sourcing it..."
+    source "$CONDA_SH"
+else
+    echo "❌ ERROR: $CONDA_SH not found — cannot source conda."
+    exit 1
+fi
 
-echo "🔎 After sourcing conda.sh → does conda exist as a function?"
-type conda 2>/dev/null || echo "'conda' still not available as a function"
+echo "-----------------------------"
+echo "4️⃣  Checking Conda Availability"
+echo "-----------------------------"
+if command -v conda >/dev/null 2>&1; then
+    echo "✅ Conda command is available."
+else
+    echo "❌ ERROR: conda still not found after sourcing conda.sh!"
+    exit 1
+fi
 
-echo "------------------------------"
-echo "🔎 Attempting 'conda activate rl_train_env'..."
-conda activate rl_train_env 2>&1 || echo "❌ conda activate failed"
+echo "-----------------------------"
+echo "5️⃣  Checking for environment"
+echo "-----------------------------"
+if conda env list | grep -q "rl_train_env"; then
+    echo "✅ Environment 'rl_train_env' exists — attempting activation"
+    conda activate rl_train_env
+else
+    echo "⚠️ Environment not found. Skipping activation."
+fi
 
-echo "Python version after attempted activation:"
-python --version
-which python
+echo "-----------------------------"
+echo "6️⃣  Final Python Diagnostics"
+echo "-----------------------------"
+echo "Using Python: $(which python)"
+echo "Python version: $(python --version)"
 
-echo "------------------------------"
-echo "🔎 Trying 'conda run -n rl_train_env python --version'..."
-conda run -n rl_train_env python --version 2>&1 || echo "❌ conda run failed"
+echo "-----------------------------"
+echo "7️⃣  CUDA Runtime Check (if available)"
+echo "-----------------------------"
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi
+else
+    echo "⚠️ No GPU detected or nvidia-smi unavailable."
+fi
 
-echo "=============================="
-echo "✅ END OF DEBUG"
+echo "====================================="
+echo "✅ DEBUG COMPLETE — No training launched"
+echo "====================================="
