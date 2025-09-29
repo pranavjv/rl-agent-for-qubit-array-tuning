@@ -105,7 +105,7 @@ def extract_training_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
         "policy_loss": plunger_policy.get("policy_loss", None),
         "vf_loss": plunger_policy.get("vf_loss", None),
         "vf_loss_unclipped": plunger_policy.get("vf_loss_unclipped", None),
-        "vf_explained_var": plunger_policy.get("vf_explained_var", None),
+        "vf_explained_var": plunger_policy.get("vf_explained_var", None), 
         "entropy": plunger_policy.get("entropy", None),
         "mean_kl": plunger_policy.get("mean_kl_loss", None),
         "advantage_mean": plunger_policy.get("advantage_mean", None),

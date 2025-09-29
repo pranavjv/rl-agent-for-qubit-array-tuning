@@ -181,7 +181,8 @@ class PolicyHead(TorchModel):
             attended, _ = self.attention(inputs, inputs, inputs)
             inputs = attended.squeeze(1)
         
-        return self.mlp(inputs)
+        x = self.mlp(inputs)
+        return F.tanh(x)
 
 @dataclass
 class IMPALAConfig(CNNEncoderConfig):

@@ -65,7 +65,7 @@ rl_config:
     train_batch_size: 16384          # Total batch size for training
     minibatch_size: 2048             # Size of minibatches for SGD
     num_epochs: 10                   # Number of SGD epochs per training iteration
-    grad_clip: 10.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
+    grad_clip: 40.0                 # Amount of gradient clipping (set to null to disable) ~40.0 is the default
     grad_clip_by: "norm"            # Gradient clipping method
 
     # PPO-specific config
