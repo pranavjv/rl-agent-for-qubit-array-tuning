@@ -6,10 +6,10 @@ qarray
 # Core ML/RL dependencies
 torch
 torchvision
-ray[rllib]
-wandb[media]
-gymnasium
 ray
+ray[rllib]
+wandb
+gymnasium
 
 # Development tools
 pytest

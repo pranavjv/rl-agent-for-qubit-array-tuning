@@ -58,7 +58,7 @@ fi
 #     echo "✅ Activating existing Conda environment 'rl_train_env'..."
 #     conda activate rl_train_env
 # else
-echo "🛠 Creating Conda environment 'rl_train_env' with Python 3.11..."
+echo "Creating Conda environment 'rl_train_env' with Python 3.11..."
 conda create -y -n rl_train_env python=3.11
 conda activate rl_train_env
 echo "Installing required packages from requirements.txt..."
@@ -70,8 +70,8 @@ else
 fi
 # fi
 
-echo "✅ Using Python: $(which python)"
-echo "✅ Python version: $(python --version)"
+echo "Using Python: $(which python)"
+echo "Python version: $(python --version)"
 
 # -----------------------------
 # 3️⃣ Validate GPU visibility
