@@ -10,6 +10,8 @@
 #SBATCH --mem=16G
 #SBATCH --clusters=htc
 #SBATCH --partition=long
+#SBATCH --mail-user=edn.work@proton.me
+#SBATCH --mail-type=ALL
 
 mkdir -p logs
 
