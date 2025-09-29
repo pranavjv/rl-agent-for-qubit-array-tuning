@@ -16,15 +16,15 @@ from qarray_latched.DotArrays.voltage_dependent_capacitance import (
     create_linear_capacitance_model,
 )
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pathlib import Path
+src_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(src_dir))
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from swarm.environment.global_varying_capacitance import (
-    GlobalCapacitanceModel,
-    linear_dependent_update as linear_dependent_capacitance_update_global,
-)
+from swarm.environment.utils import VaryPeakWidth
+
 
 # NOTE: gates are zero indexed but qarray is one indexed
 
@@ -40,6 +40,8 @@ class QarrayBaseClass:
         obs_voltage_max: float = 1.0,
         obs_image_size: int = 128,
         param_overrides: dict = None,
+        vary_peak_width: bool = False,
+        peak_width_alpha: float = 0.01,
         **kwargs,
     ):
 
@@ -71,11 +73,16 @@ class QarrayBaseClass:
         self.barrier_alpha = None
         self.barrier_tc_base = None
 
+        # Store peak width settings for use in _load_model
+        self.vary_peak_width = vary_peak_width
+        self.peak_width_alpha = peak_width_alpha
+
         # --- Initialize Model ---
         self.model = self._load_model(param_overrides)
 
-        # --- Initalise globally varying capacitances ---
-        self.global_capacitance_model = self._init_global_capacitance_model()
+        # Peak width model is now initialized in _load_model methods
+
+
 
 
     def _get_charge_sensor_data(self, voltage1, voltage2, gate1, gate2, barrier_voltages=None):
@@ -153,25 +160,17 @@ class QarrayBaseClass:
                 len(barrier_voltages) == self.num_dots - 1
             ), f"Incorrect barrier voltage shape, expected {self.num_dots - 1}, got {len(barrier_voltages)}"
 
-        # Apply global voltage-dependent capacitances
-        if self.global_capacitance_model is not None:
-            Cgd_updated, Cdd_updated = self.global_capacitance_model.update(gate_voltages, barrier_voltages)
-
-            # not updating sensor couplings
-            Cds_updated = self.model.Cds
-            Cgs_updated = self.model.Cgs
-
-            # not updating barrier capacitances
-            self.model.update_capacitance_matrices(
-                Cdd=Cdd_updated,
-                Cgd=Cgd_updated,
-                Cds=Cds_updated,
-                Cgs=Cgs_updated,
-            )
 
         allgates = list(range(1, self.num_dots + 1))  # Gate numbers for qarray (1-indexed)
         all_z = []
         for i, (gate1, gate2) in enumerate(zip(allgates[:-1], allgates[1:])):
+
+            if self.peak_width_model is not None:
+                print(gate_voltages[i], gate_voltages[i+1])
+                print(gate_voltages)
+                peak_width = self.peak_width_model.linearly_vary_peak_width(gate_voltages[i], gate_voltages[i+1])
+                self.model.coulomb_peak_width = peak_width
+
             voltage1 = float(gate_voltages[i])  # Use 0-based indexing for gate_voltages array
             voltage2 = float(gate_voltages[i + 1])  # Use 0-based indexing for gate_voltages array
             z = self._get_charge_sensor_data(voltage1, voltage2, gate1, gate2, barrier_voltages)
@@ -436,6 +435,16 @@ class QarrayBaseClass:
             "beta": self._sample_from_range(vc_config["beta"], rng),
         }
 
+    def _generate_variable_peak_width_parameters(
+        self, config_ranges: dict, rng: np.random.Generator
+    ) -> dict:
+        """Generate variable peak width model parameters."""
+        vpw_config = config_ranges["variable_peak_width_model"]
+
+        return {
+            "alpha": self._sample_from_range(vpw_config["alpha"], rng),
+        }
+
 
     def _gen_random_qarray_params_no_barriers(self, rng: np.random.Generator, param_overrides: dict) -> dict:
 
@@ -451,6 +460,7 @@ class QarrayBaseClass:
             "white_noise_amplitude": model_config["white_noise_amplitude"],
             "telegraph_noise_parameters": model_config["telegraph_noise_parameters"],
             "latching_model_parameters": model_config["latching_model_parameters"],
+            "variable_peak_width_model": model_config["variable_peak_width_model"],
             "T": model_config["T"],
             "coulomb_peak_width": model_config["coulomb_peak_width"],
         }
@@ -461,6 +471,7 @@ class QarrayBaseClass:
         Cds, Cgs = self._generate_sensor_capacitances(config_ranges, rng)
         noise_params = self._generate_noise_parameters(config_ranges, rng)
         latching_params = self._generate_latching_parameters(config_ranges, rng)
+        variable_peak_width_params = self._generate_variable_peak_width_parameters(config_ranges, rng)
 
         # Assemble final model parameters
         model_params = {
@@ -471,6 +482,7 @@ class QarrayBaseClass:
             "white_noise_amplitude": noise_params["white_noise_amplitude"],
             "telegraph_noise_parameters": noise_params["telegraph_noise_parameters"],
             "latching_model_parameters": latching_params,
+            "variable_peak_width_parameters": variable_peak_width_params,
             "T": self._sample_from_range(config_ranges["T"], rng),
             "coulomb_peak_width": self._sample_from_range(config_ranges["coulomb_peak_width"], rng),
             "algorithm": model_config["algorithm"],
@@ -510,6 +522,7 @@ class QarrayBaseClass:
             "latching_model_parameters": model_config["latching_model_parameters"],
             "barrier_model": model_config["barrier_model"],
             "voltage_capacitance_model": model_config["voltage_capacitance_model"],
+            "variable_peak_width_model": model_config["variable_peak_width_model"],
             "T": model_config["T"],
             "coulomb_peak_width": model_config["coulomb_peak_width"],
             "tc": model_config["tc"],
@@ -533,6 +546,9 @@ class QarrayBaseClass:
         voltage_capacitance_params = self._generate_voltage_capacitance_parameters(
             config_ranges, rng
         )
+        variable_peak_width_params = self._generate_variable_peak_width_parameters(
+            config_ranges, rng
+        )
 
         # Assemble final model parameters
         model_params = {
@@ -549,6 +565,7 @@ class QarrayBaseClass:
             "latching_model_parameters": latching_params,
             "barrier_model_parameters": barrier_model_params,
             "voltage_capacitance_parameters": voltage_capacitance_params,
+            "variable_peak_width_parameters": variable_peak_width_params,
             "T": self._sample_from_range(config_ranges["T"], rng),
             "coulomb_peak_width": self._sample_from_range(config_ranges["coulomb_peak_width"], rng),
             "tc": self._sample_from_range(config_ranges["tc"], rng),
@@ -582,6 +599,7 @@ class QarrayBaseClass:
     def _load_model_no_barriers(self, param_overrides: dict, rng: np.random.Generator = None):
         """
         Load the model from the config file.
+        Also not using voltage-dependent capacitance model
         """
         if rng is None:
             rng = np.random.default_rng()
@@ -616,6 +634,16 @@ class QarrayBaseClass:
             implementation=model_params["implementation"],
             max_charge_carriers=model_params["max_charge_carriers"],
         )
+
+        # Initialize peak width model (same logic as barriers version)
+        if self.vary_peak_width:
+            vpw_params = model_params["variable_peak_width_parameters"]
+            # Use override if provided, otherwise use generated parameter
+            alpha = self.peak_width_alpha if self.peak_width_alpha != 0.01 else vpw_params["alpha"]
+            self.peak_width_model = VaryPeakWidth(peak_width_0=model.coulomb_peak_width, alpha=alpha)
+        else:
+            self.peak_width_model = None
+
         return model
 
     def _load_model_with_barriers(self, param_overrides: dict, rng: np.random.Generator = None):
@@ -699,7 +727,16 @@ class QarrayBaseClass:
                 )
                 model.voltage_capacitance_model = linear_voltage_capacitance_model
             else:
-                raise ValueError(f"Capacitance model type '{capacitance_model_type}' not implemented")
+                raise ValueError(f"Capacitance model type '{capacitance_model_type}' does not exist")
+
+        # Initialize peak width model
+        if self.vary_peak_width:
+            vpw_params = model_params["variable_peak_width_parameters"]
+            # Use override if provided, otherwise use generated parameter
+            alpha = self.peak_width_alpha if self.peak_width_alpha != 0.01 else vpw_params["alpha"]
+            self.peak_width_model = VaryPeakWidth(peak_width_0=model.coulomb_peak_width, alpha=alpha)
+        else:
+            self.peak_width_model = None
 
         return model
 
@@ -708,52 +745,6 @@ class QarrayBaseClass:
         vgm = -np.linalg.pinv(np.linalg.inv(self.model.Cdd) @ cgd_estimate)
 
         self.model.gate_voltage_composer.virtual_gate_matrix = vgm
-
-    
-    def _init_global_capacitance_model(self):
-        if not self.model:
-            raise ValueError("DotArray model must be initialized before setting global capacitance model")
-
-        if isinstance(self.model, TunnelCoupledChargeSensed):
-            Cgd = self.model.cgd_full
-            Cdd = self.model.cdd_full
-
-        else:
-            Cgd = self.model.Cgd
-            Cdd = self.model.Cdd
-
-        base_capacitances = {
-            "Cgd": Cgd,
-            "Cdd": Cdd,
-        }
-
-        if self.use_barriers:
-            vg, vb, _ = self.calculate_ground_truth()
-        else:
-            vg = self.calculate_ground_truth()
-            vb = None
-        
-        ground_truth_dict = {
-            "vg": vg,
-            "vb": vb,
-        }
-
-        global_capacitance_model_type = self.config["simulator"]["global_capacitance_model"]["type"]
-        if global_capacitance_model_type is not None:
-            if global_capacitance_model_type == "linear":
-                global_capacitance_model = GlobalCapacitanceModel(
-                    base_capacitances=base_capacitances,
-                    ground_truth_coords=ground_truth_dict,
-                    update_func=linear_dependent_capacitance_update_global,
-                    alpha=self.config["simulator"]["global_capacitance_model"]["alpha"],
-                    beta=self.config["simulator"]["global_capacitance_model"]["beta"],
-                )
-            else:
-                raise ValueError(f"Global capacitance model type '{global_capacitance_model_type}' not implemented")
-        else:
-            global_capacitance_model = None
-
-        return global_capacitance_model
 
 
     def _render_frame(self, image, path="quantum_dot_plot"):
@@ -806,14 +797,16 @@ class QarrayBaseClass:
         # Add nested parameter paths for complex structures
         nested_params = {
             'telegraph_noise_parameters.p01',
-            'telegraph_noise_parameters.p10_factor', 
+            'telegraph_noise_parameters.p10_factor',
             'telegraph_noise_parameters.amplitude',
             'latching_model_parameters.p_leads',
             'latching_model_parameters.p_inter',
             'barrier_model_parameters.tc_base',
             'barrier_model_parameters.alpha',
             'voltage_capacitance_parameters.alpha',
-            'voltage_capacitance_parameters.beta'
+            'voltage_capacitance_parameters.beta',
+            'variable_peak_width_model.alpha',
+            'voltage_capacitance_model.type'
         }
         valid_params.update(nested_params)
         
@@ -828,7 +821,7 @@ class QarrayBaseClass:
     def _apply_param_overrides(self, model_params: dict, param_overrides: dict) -> None:
         """
         Apply parameter overrides to the generated model parameters.
-        
+
         Args:
             model_params (dict): Generated model parameters to modify
             param_overrides (dict): Dictionary of parameter overrides
@@ -838,7 +831,13 @@ class QarrayBaseClass:
                 # Handle nested parameters like 'telegraph_noise_parameters.p01'
                 parent_key, child_key = param_key.split('.', 1)
                 if parent_key in model_params and isinstance(model_params[parent_key], dict):
-                    model_params[parent_key][child_key] = override_value
+                    # Special handling for telegraph noise p10_factor conversion
+                    if parent_key == 'telegraph_noise_parameters' and child_key == 'p10_factor':
+                        # Convert p10_factor to p10 (p10 = p10_factor * p01)
+                        p01 = model_params[parent_key].get('p01', 0.005)  # Use existing p01 or default
+                        model_params[parent_key]['p10'] = override_value * p01
+                    else:
+                        model_params[parent_key][child_key] = override_value
             else:
                 # Handle top-level parameters
                 model_params[param_key] = override_value
@@ -937,6 +936,7 @@ if __name__ == "__main__":
         use_barriers=use_barriers,
         obs_voltage_min=-1.5,
         obs_voltage_max=1.5,
+        vary_peak_width=True,
     )
     import time
 
@@ -944,7 +944,7 @@ if __name__ == "__main__":
 
     # os.environ['JAX_PLATFORM_NAME'] = 'cpu'  # Force CPU-only execution
     # os.environ['JAX_PLATFORMS'] = 'cpu'  # Alternative JAX CPU-only setting
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 
     target = [1] * num_dots + [0.5]
     if use_barriers:

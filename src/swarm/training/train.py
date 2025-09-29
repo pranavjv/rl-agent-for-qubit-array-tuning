@@ -570,7 +570,7 @@ def main():
             if latest_checkpoint:
                 print(f"\nFound latest checkpoint: {latest_checkpoint} (iteration {latest_iteration})")
                 try:
-                    algo.restore_from_path(str(latest_checkpoint))
+                    algo.restore_from_path(str(Path(latest_checkpoint).absolute()))
                     start_iteration = latest_iteration
                     checkpoint_loaded = True
                     print(f"Latest checkpoint loaded successfully. Resuming from iteration {start_iteration + 1}")

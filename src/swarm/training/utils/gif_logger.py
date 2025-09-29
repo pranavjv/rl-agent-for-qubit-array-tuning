@@ -59,13 +59,36 @@ def cleanup_gif_files(gif_save_dir=None):
     """Remove gif capture lock file and images from previous training runs."""
     import os
 
-    # Clean up lock file
+    # Clean up lock file with stale process detection
     lock_file = "/tmp/gif_capture_worker.lock"
     try:
-        os.remove(lock_file)
-        print("Cleaned up previous GIF capture lock file")
+        # Check if lock file exists and if the process is still alive
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, 'r') as f:
+                    old_pid = int(f.read().strip())
+
+                # Check if process is still running
+                try:
+                    os.kill(old_pid, 0)  # Signal 0 checks if process exists
+                    print(f"Warning: Lock file exists with active process {old_pid}. Another training may be running.")
+                except OSError:
+                    # Process doesn't exist - safe to remove stale lock
+                    os.remove(lock_file)
+                    print(f"Cleaned up stale GIF capture lock file (process {old_pid} no longer exists)")
+            except (ValueError, IOError):
+                # Couldn't read PID or file is corrupted - try to remove anyway
+                try:
+                    os.remove(lock_file)
+                    print("Cleaned up corrupted GIF capture lock file")
+                except PermissionError:
+                    print(f"Warning: Lock file exists but cannot be removed due to permissions. Try: sudo rm {lock_file}")
+        else:
+            pass  # No lock file, nothing to clean
     except FileNotFoundError:
-        pass  # Already gone, that's fine
+        pass  # Already gone between check and removal
+    except PermissionError:
+        print(f"Warning: Could not remove GIF lock file due to permissions. Try: sudo rm {lock_file}")
     except Exception as e:
         print(f"Warning: Could not remove GIF lock file: {e}")
 

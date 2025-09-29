@@ -504,8 +504,28 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
         lock_file = "/tmp/gif_capture_worker.lock"
 
         try:
+            # Check for stale lock first
+            if os.path.exists(lock_file):
+                try:
+                    with open(lock_file, 'r') as f:
+                        old_pid = int(f.read().strip())
+                    # Check if that process still exists
+                    try:
+                        os.kill(old_pid, 0)
+                        # Process still exists - race lost
+                        print(f"Race Lost - active worker {old_pid} exists")
+                        return False
+                    except OSError:
+                        # Stale lock - remove it
+                        os.remove(lock_file)
+                        print(f"Removed stale lock from PID {old_pid}")
+                except (ValueError, IOError, PermissionError):
+                    # Can't read or remove - skip and try to create anyway
+                    pass
+
             # Atomic file creation - only succeeds for first worker
-            lock_fd = os.open(lock_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            # Use 0o666 for more permissive access (subject to umask)
+            lock_fd = os.open(lock_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
 
             # Write our PID to the lock file
             with os.fdopen(lock_fd, 'w') as f:

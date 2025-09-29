@@ -10,7 +10,6 @@ from ray.rllib.utils.annotations import override
 
 
 class PPOLearnerWithValueStats(PPOTorchLearner):
-    
     @override(PPOTorchLearner)
     def compute_loss_for_module(self, *, module_id, config, batch, fwd_out):
         """
