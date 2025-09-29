@@ -11,6 +11,7 @@ from ray.rllib.utils.annotations import override
 from .custom_neural_nets import (
     SimpleCNNConfig,
     IMPALAConfig,
+    MobileNetConfig,
     PolicyHeadConfig,
     ValueHeadConfig,
 )
@@ -67,9 +68,16 @@ class CustomPPOCatalog(PPOCatalog):
                     feature_size=backbone_config.get("feature_size", 256),
                     adaptive_pooling=backbone_config.get("adaptive_pooling", True),
                 )
-            
+            elif backbone_type == "MobileNet":
+                tokenizer_config = MobileNetConfig(
+                    input_dims=observation_space.shape,
+                    mobilenet_version=backbone_config.get("mobilenet_version", "small"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    freeze_backbone=backbone_config.get("freeze_backbone", False),
+                )
+
             else:
-                raise ValueError(f"Unsupported backbone type: {backbone_type}")
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA', 'MobileNet'")
             
             # Wrap CNN with LSTM
             return RecurrentEncoderConfig(
@@ -106,8 +114,15 @@ class CustomPPOCatalog(PPOCatalog):
                     feature_size=backbone_config.get("feature_size", 256),
                     adaptive_pooling=backbone_config.get("adaptive_pooling", True),
                 )
+            elif backbone_type == "MobileNet":
+                return MobileNetConfig(
+                    input_dims=observation_space.shape,
+                    mobilenet_version=backbone_config.get("mobilenet_version", "small"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    freeze_backbone=backbone_config.get("freeze_backbone", False),
+                )
             else:
-                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA'")
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA', 'MobileNet'")
         else:
             return super()._get_encoder_config(
                 observation_space=observation_space,
@@ -212,9 +227,16 @@ class CustomSACCatalog(SACCatalog):
                     feature_size=backbone_config.get("feature_size", 256),
                     adaptive_pooling=backbone_config.get("adaptive_pooling", True),
                 )
+            elif backbone_type == "MobileNet":
+                tokenizer_config = MobileNetConfig(
+                    input_dims=observation_space.shape,
+                    mobilenet_version=backbone_config.get("mobilenet_version", "small"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    freeze_backbone=backbone_config.get("freeze_backbone", False),
+                )
             else:
-                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA'")
-            
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA', 'MobileNet'")
+
             # Wrap CNN with LSTM
             return RecurrentEncoderConfig(
                 input_dims=tokenizer_config.output_dims,
@@ -250,8 +272,15 @@ class CustomSACCatalog(SACCatalog):
                     feature_size=backbone_config.get("feature_size", 256),
                     adaptive_pooling=backbone_config.get("adaptive_pooling", True),
                 )
+            elif backbone_type == "MobileNet":
+                return MobileNetConfig(
+                    input_dims=observation_space.shape,
+                    mobilenet_version=backbone_config.get("mobilenet_version", "small"),
+                    feature_size=backbone_config.get("feature_size", 256),
+                    freeze_backbone=backbone_config.get("freeze_backbone", False),
+                )
             else:
-                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA'")
+                raise ValueError(f"Unsupported backbone type: {backbone_type}. Supported types: 'SimpleCNN', 'IMPALA', 'MobileNet'")
         else:
             return super()._get_encoder_config(
                 observation_space=observation_space,

@@ -492,7 +492,7 @@ class MultiAgentEnvWrapper(MultiAgentEnv):
             else:
                 print(f"[PID {os.getpid()}] GIF capture disabled in config")
         else:
-            print(f"[PID {os.getpid()}] Not selected for GIF capture")
+            pass
 
     def _is_first_env_runner(self):
         """Check if this is the first env runner using atomic file creation."""

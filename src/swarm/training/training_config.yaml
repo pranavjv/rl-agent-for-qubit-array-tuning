@@ -130,17 +130,21 @@ gif_config:
 
 # Neural Network Architecture Configuration
 neural_networks:
-  # chosee between SimpleCNN, IMPALA, ViT
+  # chose between SimpleCNN, IMPALA, MobileNet
   plunger_policy:
     backbone:
-      type: "IMPALA"
-      # note custom backbone layers will only be applied for SimplCNN and IMPALA
-      conv_layers:
-        - {channels: 16, kernel: 3, stride: 1}
-        - {channels: 32, kernel: 3, stride: 1}
-        - {channels: 32, kernel: 3, stride: 1}
+      type: "MobileNet"
+      mobilenet_version: "small"
       feature_size: 256
-      adaptive_pooling: true
+      freeze_backbone: false
+#       type: "IMPALA"
+#       # note custom backbone layers will only be applied for SimplCNN and IMPALA
+#       conv_layers:
+#         - {channels: 16, kernel: 3, stride: 1}
+#         - {channels: 32, kernel: 3, stride: 1}
+#         - {channels: 32, kernel: 3, stride: 1}
+#       feature_size: 256
+#       adaptive_pooling: true
       lstm:
         enabled: true
         cell_size: 256

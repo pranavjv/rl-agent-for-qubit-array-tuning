@@ -10,6 +10,12 @@ from ray.rllib.utils.framework import try_import_torch
 
 torch, nn = try_import_torch()
 
+# Import torchvision models for MobileNet
+try:
+    import torchvision.models as models
+except ImportError:
+    models = None
+
 
 @dataclass
 class SimpleCNNConfig(CNNEncoderConfig):
@@ -370,6 +376,130 @@ class ValueHead(TorchModel):
         return self.mlp(inputs)
 
 
+@dataclass
+class MobileNetConfig(CNNEncoderConfig):
+    """MobileNet configuration for quantum charge stability diagrams with pretrained backbone."""
+
+    mobilenet_version: str = "small"  # "small" or "large"
+    feature_size: int = 256
+    freeze_backbone: bool = False
+
+    def __post_init__(self):
+        # Set the feature dimensions based on MobileNet version
+        if self.mobilenet_version == "small":
+            self._backbone_feature_dim = 576
+        elif self.mobilenet_version == "large":
+            self._backbone_feature_dim = 960
+        else:
+            raise ValueError(f"Unsupported MobileNet version: {self.mobilenet_version}. Use 'small' or 'large'.")
+
+    @property
+    def output_dims(self):
+        return (self.feature_size,)
+
+    def build(self, framework: str = "torch") -> "MobileNet":
+        if framework != "torch":
+            raise ValueError(f"Only torch framework supported, got {framework}")
+        if models is None:
+            raise ImportError("torchvision is required for MobileNet backbone")
+        return MobileNet(self)
+
+
+class MobileNet(TorchModel, Encoder):
+    """MobileNet encoder for quantum charge stability diagrams using pretrained backbone."""
+
+    def __init__(self, config: MobileNetConfig):
+        TorchModel.__init__(self, config)
+        Encoder.__init__(self, config)
+
+        self.config = config
+
+        # Load pretrained MobileNet backbone
+        if config.mobilenet_version == "small":
+            self.backbone = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
+            feature_dim = 576
+        elif config.mobilenet_version == "large":
+            self.backbone = models.mobilenet_v3_large(weights=models.MobileNet_V3_Large_Weights.DEFAULT)
+            feature_dim = 960
+        else:
+            raise ValueError(f"Unsupported MobileNet version: {config.mobilenet_version}")
+
+        # Modify first conv layer to accept the correct number of input channels
+        input_channels = config.input_dims[-1]
+        original_conv1 = self.backbone.features[0][0]
+        self.backbone.features[0][0] = nn.Conv2d(
+            in_channels=input_channels,
+            out_channels=original_conv1.out_channels,
+            kernel_size=original_conv1.kernel_size,
+            stride=original_conv1.stride,
+            padding=original_conv1.padding,
+            bias=original_conv1.bias is not None
+        )
+
+        # Initialize new conv1 weights
+        with torch.no_grad():
+            if input_channels <= 3:
+                # Use subset of original weights if we have fewer channels
+                self.backbone.features[0][0].weight = nn.Parameter(
+                    original_conv1.weight[:, :input_channels, :, :].clone()
+                )
+            else:
+                # Repeat channels if we need more than 3
+                weight = original_conv1.weight
+                repeats = (input_channels + 2) // 3  # Ceiling division
+                repeated_weight = weight.repeat(1, repeats, 1, 1)
+                self.backbone.features[0][0].weight = nn.Parameter(
+                    repeated_weight[:, :input_channels, :, :].clone()
+                )
+
+        # Remove the final classification layer
+        self.backbone.classifier = nn.Identity()
+
+        # Freeze backbone if requested
+        if config.freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+
+        # Add final projection layer to match desired feature size
+        self.projection = nn.Sequential(
+            nn.Linear(feature_dim, config.feature_size),
+            nn.ReLU(),
+        )
+
+        self._output_dims = (config.feature_size,)
+
+    @property
+    def output_dims(self) -> Tuple[int, ...]:
+        return self._output_dims
+
+    def _forward(self, inputs, **kwargs):
+        if isinstance(inputs, dict) and "obs" in inputs:
+            inputs = inputs["obs"]
+
+        if isinstance(inputs, dict):
+            if "image" in inputs:
+                x = inputs["image"]
+            else:
+                raise ValueError(f"Unexpected input dict structure: {list(inputs.keys())}")
+        else:
+            x = inputs
+
+        if x.dim() == 3:
+            x = x.unsqueeze(0)
+
+        # MobileNet expects channel-first format (B, C, H, W)
+        if x.shape[-1] <= 8:  # Assume last dim is channels if small
+            x = x.permute(0, 3, 1, 2)
+
+        # Extract features using MobileNet backbone
+        backbone_features = self.backbone(x)
+
+        # Project to desired feature size
+        output_features = self.projection(backbone_features)
+
+        return {ENCODER_OUT: output_features}
+
+
 if __name__ == "__main__":
     """Print parameter counts for all network configurations."""
     import yaml
@@ -423,6 +553,14 @@ if __name__ == "__main__":
                     adaptive_pooling=backbone_config.get('adaptive_pooling', True),
                     num_res_blocks=backbone_config.get('num_res_blocks', 2),
                     cnn_activation="relu"
+                )
+                backbone = config_obj.build()
+            elif backbone_type == 'MobileNet':
+                config_obj = MobileNetConfig(
+                    input_dims=input_dims,
+                    mobilenet_version=backbone_config.get('mobilenet_version', 'small'),
+                    feature_size=backbone_config.get('feature_size', 256),
+                    freeze_backbone=backbone_config.get('freeze_backbone', False)
                 )
                 backbone = config_obj.build()
             else:
