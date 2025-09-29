@@ -3,7 +3,7 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --time=100:00:00
-#SBATCH --gres=gpu:8 --constraint='gpu_mem:32GB'
+#SBATCH --gres=gpu:8
 #SBATCH --nodes=2
 #SBATCH --ntasks=1                                      # Ray multiprocessing task assignment
 #SBATCH --cpus-per-task=8
