@@ -21,6 +21,18 @@ echo "Working Directory: $(pwd)"
 echo "Date: $(date)"
 echo "====================================="
 
+# Function to log disk usage
+log_disk_usage() {
+    echo "--------- Disk Usage & Quota ---------"
+    echo "Disk usage of home directory:"
+    du -sh ~
+    echo "Disk quota and usage:"
+    quota -s
+    echo "-------------------------------------"
+}
+
+log_disk_usage
+
 # -----------------------------
 # 1️⃣ Load Anaconda & Latest CUDA
 # -----------------------------
@@ -41,6 +53,8 @@ else
     module load "$CUDA_VERSION"
 fi
 
+log_disk_usage
+
 # -----------------------------
 # 2️⃣ Enable Conda shell & Create/Activate Environment
 # -----------------------------
@@ -53,14 +67,18 @@ else
     exit 1
 fi
 
-# Create environment if missing
-# if conda env list | grep -q "rl_train_env"; then
-#     echo "✅ Activating existing Conda environment 'rl_train_env'..."
-#     conda activate rl_train_env
-# else
+# Clean caches before environment creation
+echo "Cleaning Conda and pip caches before environment creation..."
+conda clean --all -y
+pip cache purge
+
+log_disk_usage
+
+# Create environment
 echo "Creating Conda environment 'rl_train_env' with Python 3.11..."
 conda create -y -n rl_train_env python=3.11
 conda activate rl_train_env
+
 echo "Installing required packages from requirements.txt..."
 pip install --upgrade pip
 if [[ -f requirements.txt ]]; then
@@ -68,7 +86,13 @@ if [[ -f requirements.txt ]]; then
 else
     echo "⚠️ requirements.txt not found. Skipping package installation."
 fi
-# fi
+
+# Clean caches again after installation
+echo "Cleaning Conda and pip caches after package installation..."
+conda clean --all -y
+pip cache purge
+
+log_disk_usage
 
 echo "Using Python: $(which python)"
 echo "Python version: $(python --version)"
@@ -84,7 +108,6 @@ else
     exit 1
 fi
 
-# Optional: Check PyTorch sees GPU
 python - << 'EOF'
 try:
     import torch
@@ -95,6 +118,8 @@ except ModuleNotFoundError:
     print("❌ Torch not installed in this environment")
 EOF
 echo "============================="
+
+log_disk_usage
 
 # -----------------------------
 # 4️⃣ Run training script
