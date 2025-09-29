@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=arc_qarray_rl_training
+#SBATCH --job-name=nvidia_qarray_rl_training
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --time=100:00:00
