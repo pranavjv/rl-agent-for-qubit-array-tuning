@@ -13,21 +13,30 @@
 
 mkdir -p logs
 
+echo "========= SLURM ENVIRONMENT ========="
+echo "Hostname: $(hostname)"
+echo "Working Directory: $(pwd)"
+echo "Date: $(date)"
+echo "====================================="
+
 # -----------------------------
 # 1. Load Anaconda and CUDA
 # -----------------------------
 module purge
 module load Anaconda3
 
-echo "Available CUDA modules:"
-module spider CUDA
-
-CUDA_VERSION=$(module avail CUDA 2>&1 | grep -oP 'CUDA/\S+' | sort -V | tail -n 1)
+CUDA_VERSION=$(module spider CUDA 2>&1 | grep -oP 'CUDA/12\.[0-9\.]+' | sort -V | tail -n 1)
 if [[ -z "$CUDA_VERSION" ]]; then
-    echo "⚠️ No CUDA modules found. Proceeding without CUDA."
+    echo "⚠️ No CUDA 12.x modules found. Trying any available version..."
+    CUDA_VERSION=$(module spider CUDA 2>&1 | grep -oP 'CUDA/[0-9\.]+' | sort -V | tail -n 1)
+fi
+
+if [[ -z "$CUDA_VERSION" ]]; then
+    echo "❌ No CUDA modules found — exiting."
+    exit 1
 else
-    echo "Loading CUDA module: $CUDA_VERSION"
-    module load $CUDA_VERSION
+    echo "✅ Loading CUDA module: $CUDA_VERSION"
+    module load "$CUDA_VERSION"
 fi
 
 # -----------------------------
@@ -39,21 +48,36 @@ if conda env list | grep -q "rl_train_env"; then
     echo "Activating existing Conda environment 'rl_train_env'..."
     conda activate rl_train_env
 else
-    echo "Environment 'rl_train_env' not found. Creating from YAML..."
-    if [ -f rl_train_env.yml ]; then
-        conda env create -f rl_train_env.yml
-        conda activate rl_train_env
-    else
-        echo "❌ YAML file rl_train_env.yml not found. Cannot create environment."
-        exit 1
-    fi
+    echo "❌ Environment 'rl_train_env' missing — exiting."
+    exit 1
 fi
 
 echo "✅ Using Python: $(which python)"
 echo "✅ Python version: $(python --version)"
 
 # -----------------------------
-# 3. Run training script
+# 3. Validate GPU is visible
 # -----------------------------
-echo "Running training script..."
-srun python src/swarm/training/train.py
+echo "========= GPU CHECK ========="
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi
+else
+    echo "❌ ERROR: nvidia-smi not available — GPU may not be allocated correctly."
+    exit 1
+fi
+
+# Optional: Check PyTorch sees GPU
+python - << 'EOF'
+import torch
+print("Torch CUDA Available:", torch.cuda.is_available())
+print("Torch Device Count:", torch.cuda.device_count())
+print("Torch Current Device:", torch.cuda.current_device() if torch.cuda.is_available() else "N/A")
+EOF
+echo "============================="
+
+# -----------------------------
+# 4. Run training script
+# -----------------------------
+echo "🚀 Launching training..."
+echo "Did not train, debug finished."
+# srun python src/swarm/training/train.py
