@@ -5,6 +5,7 @@
 defaults:
   num_iterations: 1000        # Total training iterations
   num_gpus: 8                # Default number of GPUs to use
+  delete_old_checkpoints: true # Delete local checkpoints as we go along
 
 # Weights & Biases configuration
 wandb:

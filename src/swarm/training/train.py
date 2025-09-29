@@ -205,6 +205,59 @@ def find_latest_checkpoint(checkpoint_dir):
     return latest_checkpoint, max_iteration
 
 
+def clean_checkpoint_folder(checkpoint_dir):
+    """Clean checkpoint folder at start of training, keeping yaml files."""
+    import shutil
+    
+    checkpoint_dir = Path(checkpoint_dir)
+    if not checkpoint_dir.exists():
+        return
+    
+    # Remove all iteration_* directories
+    iteration_pattern = checkpoint_dir / "iteration_*"
+    iteration_dirs = glob.glob(str(iteration_pattern))
+    
+    for iteration_dir in iteration_dirs:
+        try:
+            shutil.rmtree(iteration_dir)
+        except Exception as e:
+            print(f"Warning: Could not delete {iteration_dir}: {e}")
+
+
+def delete_old_checkpoint_if_needed(checkpoint_dir):
+    """Keep only the latest checkpoint, delete all older ones."""
+    import shutil
+    
+    checkpoint_dir = Path(checkpoint_dir)
+    if not checkpoint_dir.exists():
+        return
+    
+    # Find all iteration directories
+    iteration_pattern = checkpoint_dir / "iteration_*"
+    iteration_dirs = glob.glob(str(iteration_pattern))
+    
+    if len(iteration_dirs) <= 1:
+        return  # Keep at least 1 checkpoint
+    
+    # Extract iteration numbers and sort
+    iteration_info = []
+    for iteration_dir in iteration_dirs:
+        match = re.search(r'iteration_(\d+)', iteration_dir)
+        if match:
+            iteration_num = int(match.group(1))
+            iteration_info.append((iteration_num, iteration_dir))
+    
+    # Sort by iteration number (oldest first)
+    iteration_info.sort(key=lambda x: x[0])
+    
+    # Delete all but the latest checkpoint
+    for iteration_num, iteration_dir in iteration_info[:-1]:
+        try:
+            shutil.rmtree(iteration_dir)
+        except Exception as e:
+            print(f"Warning: Could not delete old checkpoint {iteration_dir}: {e}")
+
+
 
 
 def parse_arguments():
@@ -541,6 +594,11 @@ def main():
         # Save training config to checkpoint directory for easy reference
         checkpoint_base_dir = Path(config['checkpoints']['save_dir'])
         checkpoint_base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Clean old checkpoints if delete_old_checkpoints is enabled and starting fresh training
+        if config['defaults']['delete_old_checkpoints'] and not checkpoint_loaded:
+            clean_checkpoint_folder(checkpoint_base_dir)
+        
         config_save_path = checkpoint_base_dir / "training_config.yaml"
         with open(config_save_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
@@ -578,6 +636,10 @@ def main():
             local_checkpoint_dir = Path(config['checkpoints']['save_dir']) / f"iteration_{i+1}"
             local_checkpoint_dir.mkdir(parents=True, exist_ok=True)
             checkpoint_path = algo.save_to_path(str(local_checkpoint_dir.absolute()))
+
+            # Delete old checkpoints if enabled (keep only latest)
+            if config['defaults']['delete_old_checkpoints']:
+                delete_old_checkpoint_if_needed(Path(config['checkpoints']['save_dir']))
 
             # Upload checkpoint as wandb artifact if performance improved
             if config['checkpoints']['upload_best_only']:
