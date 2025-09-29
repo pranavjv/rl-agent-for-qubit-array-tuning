@@ -4,8 +4,8 @@
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --time=100:00:00
 #SBATCH --gres=gpu:8
-#SBATCH --nodes=2
-#SBATCH --ntasks=1                                      # Ray multiprocessing task assignment
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --clusters=htc
@@ -31,11 +31,10 @@ else
 fi
 
 # -----------------------------
-# 2. Activate Conda environment
+# 2. Enable Conda shell & Activate Environment
 # -----------------------------
-source ~/.bashrc
+source /apps/system/easybuild/software/Anaconda3/2022.05/etc/profile.d/conda.sh
 
-# Check if environment exists
 if conda env list | grep -q "rl_train_env"; then
     echo "Activating existing Conda environment 'rl_train_env'..."
     conda activate rl_train_env
@@ -50,13 +49,11 @@ else
     fi
 fi
 
+echo "✅ Using Python: $(which python)"
+echo "✅ Python version: $(python --version)"
+
 # -----------------------------
-# 3. Run your training script
+# 3. Run training script
 # -----------------------------
 echo "Running training script..."
-# srun python src/swarm/training/train.py
-# srun \
-#     --output=logs/%x_%j_task%t.out \
-#     --error=logs/%x_%j_task%t.err \
-#     python src/swarm/training/train.py
-python src/swarm/training/train.py
+srun python src/swarm/training/train.py
