@@ -5,11 +5,13 @@
 #SBATCH --time=100:00:00
 #SBATCH --gres=gpu:8 --constraint='gpu_mem:32GB'
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks=1                                      # Ray multiprocessing task assignment
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --clusters=htc
 #SBATCH --partition=long
+
+mkdir -p logs
 
 # -----------------------------
 # 1. Load Anaconda and CUDA
@@ -52,4 +54,9 @@ fi
 # 3. Run your training script
 # -----------------------------
 echo "Running training script..."
-srun python src/swarm/training/train.py
+# srun python src/swarm/training/train.py
+# srun \
+#     --output=logs/%x_%j_task%t.out \
+#     --error=logs/%x_%j_task%t.err \
+#     python src/swarm/training/train.py
+python src/swarm/training/train.py
