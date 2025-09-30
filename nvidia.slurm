@@ -12,12 +12,7 @@
 set -e
 set -u
 
-mkdir -p logs
-
-echo "Hostname: $(hostname)"
-echo "Working Directory: $(pwd)"
-echo "Date: $(date)"
-
+mkdir -p logs #sbatch logs placed in here
 
 module purge
 module load Anaconda3
@@ -37,7 +32,6 @@ else
     echo "using existing conda env"
 fi
 
-echo "checking GPU availability"
 nvidia-smi || { echo "ERROR: nvidia-smi failed"; exit 1; }
 
 srun conda run --no-capture-output -n "$ENV_NAME" python src/swarm/training/train.py
