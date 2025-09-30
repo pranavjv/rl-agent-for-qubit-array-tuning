@@ -6,8 +6,11 @@
 #SBATCH --gres=gpu:8
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=64G
+
+set -e
+set -u
 
 mkdir -p logs
 
@@ -18,47 +21,23 @@ echo "Date: $(date)"
 
 module purge
 module load Anaconda3
+module load CUDA/12.3.0
 
-CUDA_VERSION=$(module spider CUDA 2>&1 | grep -oP 'CUDA/12\.[0-9\.]+' | sort -V | tail -n 1)
-if [[ -z "$CUDA_VERSION" ]]; then
-    echo "No CUDA 12.x modules found. Trying any available version..."
-    CUDA_VERSION=$(module spider CUDA 2>&1 | grep -oP 'CUDA/[0-9\.]+' | sort -V | tail -n 1)
-fi
 
-if [[ -z "$CUDA_VERSION" ]]; then
-    echo "No CUDA modules found — exiting."
-    exit 1
+ENV_NAME="rl_train_env"
+
+if ! conda env list | grep -q "^${ENV_NAME} "; then
+    echo "creating new conda env"
+    conda create -y -n "$ENV_NAME" python=3.11
+
+    conda run -n "$ENV_NAME" pip install --upgrade pip
+    conda run -n "$ENV_NAME" pip install -r requirements.txt
+    echo "env setup done"
 else
-    module load "$CUDA_VERSION"
+    echo "using existing conda env"
 fi
 
+echo "checking GPU availability"
+nvidia-smi || { echo "ERROR: nvidia-smi failed"; exit 1; }
 
-CONDA_SH="/apps/system/easybuild/software/Anaconda3/2022.05/etc/profile.d/conda.sh"
-if [[ -f "$CONDA_SH" ]]; then
-    source "$CONDA_SH"
-else
-    echo "conda.sh not found at $CONDA_SH"
-    exit 1
-fi
-
-
-conda create -y -n rl_train_env python=3.11
-conda activate rl_train_env
-
-pip install --upgrade pip
-if [[ -f requirements.txt ]]; then
-    pip install -r requirements.txt
-else
-    echo "requirements.txt not found. Skipping package installation."
-    exit 1
-fi
-
-
-if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi
-else
-    echo "ERROR: nvidia-smi not available — GPU may not be allocated correctly."
-    exit 1
-fi
-
-srun python src/swarm/training/train.py
+srun conda run --no-capture-output -n "$ENV_NAME" python src/swarm/training/train.py
