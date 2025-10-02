@@ -1,21 +1,21 @@
-#!/bin/bash
-#SBATCH --job-name=nvidia_qarray_rl_training
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
-#SBATCH --time=100:00:00
-#SBATCH --gres=gpu:8
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=64G
+#SBATCH -A nvr_asicvlsi_quantum PPP - ours is coreai_libraries_cuquantum
+#SBATCH -J nvr_asicvlsi_quantum:demo_train1 #<job name of my choosing>? Looping script for each name.
+#SBATCH -t 03:58:00 #set time limit of job allocation. Limit of 4 hours.
+#SBATCH -p batch #<partition name> probably batch
+#SBATCH -N 1 #<number of nodes> each node is a DGX, so I will have to modify my script to run 2 jobs at once
+#SBATCH --dependency=singleton #leave as singleton, give each job a different name
+#SBATCH -o ./sbatch_logs/multi/%x_%j.out #%x chosen name %j automatically generated job ID
+#SBATCH -e ./sbatch_logs/multi/%x_%j.err
+
+
+#--mail-type=FAIL,REQUEUE,TIME_LIMIT,TIME_LIMIT_50,TIME_LIMIT_80,TIME_LIMIT_90,END #send a request to put my account on allocation
+#set -euxo pipefail #leave this because mystery
 
 set -e
 set -u
 
 mkdir -p logs #sbatch logs placed in here
 
-# Define the Docker image from your GitLab registry
-# TODO: Replace this with your actual GitLab registry image
 DOCKER_IMAGE="gitlab-master.nvidia.com/pvaidhyanath/rlqarray/rl-qarray-training:latest"
 
 # Define the working directory (current project directory)
