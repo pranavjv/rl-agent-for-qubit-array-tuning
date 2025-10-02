@@ -121,18 +121,17 @@ class SimpleCNN(TorchModel, Encoder):
 @dataclass
 class PolicyHeadConfig(MLPHeadConfig):
     """Policy head configuration for quantum device control."""
-
+    
     hidden_layers: Optional[List[int]] = None
     activation: str = "relu"
     use_attention: bool = False
-    use_tanh: bool = True
-
+    
     def __post_init__(self):
         if self.hidden_layers:
             self.hidden_layer_dims = self.hidden_layers
         else:
             self.hidden_layer_dims = [128, 128]
-
+        
         self.hidden_layer_activation = self.activation
         self.output_layer_activation = "linear"
     
@@ -182,11 +181,9 @@ class PolicyHead(TorchModel):
             inputs = inputs.unsqueeze(1)
             attended, _ = self.attention(inputs, inputs, inputs)
             inputs = attended.squeeze(1)
-
+        
         x = self.mlp(inputs)
-        if self.config.use_tanh:
-            x = F.tanh(x)
-        return x
+        return F.tanh(x)
 
 @dataclass
 class IMPALAConfig(CNNEncoderConfig):
@@ -583,8 +580,7 @@ if __name__ == "__main__":
                 output_layer_dim=2,  # mean + log_std for continuous actions
                 hidden_layers=policy_head_config.get('hidden_layers', [128, 128]),
                 activation=policy_head_config.get('activation', 'relu'),
-                use_attention=policy_head_config.get('use_attention', False),
-                use_tanh=policy_head_config.get('use_tanh', True)
+                use_attention=policy_head_config.get('use_attention', False)
             )
             policy_head = policy_head_obj.build()
             policy_head_params = count_parameters(policy_head)
