@@ -22,7 +22,7 @@ srun -A <account> \
 
 ### 3. Key Parameters
 
-- **Account**: `nvr_asicvlsi_quantum`
+- **Account**: `nvr_asicvlsi_quantum` 
 - **Job Name**: `nvr_asicvlsi_quantum:rl_qarray_train1`
 - **Time Limit**: 3:58:00 (just under 4 hours)
 - **Nodes**: 1 (can be increased as needed)
